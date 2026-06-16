@@ -14,6 +14,12 @@ export class BannersService {
     });
   }
 
+  findAllAdmin() {
+    return this.prisma.banner.findMany({
+      orderBy: [{ sortOrder: 'asc' }, { createdAt: 'desc' }],
+    });
+  }
+
   async findOne(id: string) {
     const banner = await this.prisma.banner.findFirst({ where: { id, isActive: true } });
     if (!banner) throw new NotFoundException('Banner tidak ditemukan');

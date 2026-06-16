@@ -6,7 +6,7 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
-import { User, UserRole } from '@prisma/client';
+import { Prisma, User, UserRole } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 import { PrismaService } from '../../prisma/prisma.service';
 import { ChangePasswordDto } from './dto/change-password.dto';
@@ -38,26 +38,30 @@ export class AuthService {
   // REGISTER
   // ============================================
   async register(dto: RegisterDto): Promise<{ user: UserResponseEntity; tokens: AuthTokens }> {
-    const existing = await this.prisma.user.findUnique({
-      where: { email: dto.email },
-    });
-    if (existing) {
-      throw new ConflictException('Email sudah terdaftar');
-    }
-
     const hashedPassword = await bcrypt.hash(dto.password, 12);
-    const user = await this.prisma.user.create({
-      data: {
-        email: dto.email,
-        password: hashedPassword,
-        name: dto.name,
-        phone: dto.phone,
-        role: UserRole.CUSTOMER,
-      },
-    });
+    const normalizedPhone = dto.phone ? this.normalizePhone(dto.phone) : null;
 
-    const tokens = await this.generateTokens(user.id, user.email, user.role);
-    return { user: this.toUserResponse(user), tokens };
+    try {
+      return await this.prisma.$transaction(async (tx) => {
+        const user = await tx.user.create({
+          data: {
+            email: dto.email,
+            password: hashedPassword,
+            name: dto.name,
+            phone: normalizedPhone,
+            role: UserRole.CUSTOMER,
+          },
+        });
+
+        const tokens = await this.generateTokensInTx(tx, user.id, user.email, user.role);
+        return { user: this.toUserResponse(user), tokens };
+      });
+    } catch (err) {
+      if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
+        throw new ConflictException('Email sudah terdaftar');
+      }
+      throw err;
+    }
   }
 
   // ============================================
@@ -114,16 +118,21 @@ export class AuthService {
       throw new UnauthorizedException('User tidak aktif');
     }
 
-    // Rotate: revoke old, issue new
-    const revoked = await this.prisma.refreshToken.updateMany({
-      where: { id: stored.id, revokedAt: null },
-      data: { revokedAt: new Date() },
-    });
-    if (revoked.count === 0) {
-      throw new UnauthorizedException('Refresh token sudah tidak berlaku');
-    }
+    // Rotate atomically: revoke old and issue new inside a transaction
+    return this.prisma.$transaction(async (tx) => {
+      const revoked = await tx.$executeRaw`
+        UPDATE refresh_tokens
+        SET revokedAt = NOW()
+        WHERE id = ${stored.id} AND revokedAt IS NULL
+      `;
+      if (revoked === 0) {
+        // Token was already revoked: potential reuse
+        console.warn(`[AUTH] Refresh token reuse detected for user ${stored.userId}`);
+        throw new UnauthorizedException('Refresh token sudah tidak berlaku');
+      }
 
-    return this.generateTokens(user.id, user.email, user.role);
+      return this.generateTokensInTx(tx, user.id, user.email, user.role);
+    });
   }
 
   // ============================================
@@ -188,6 +197,15 @@ export class AuthService {
   // HELPERS
   // ============================================
   private async generateTokens(userId: string, email: string, role: UserRole): Promise<AuthTokens> {
+    return this.prisma.$transaction(async (tx) => this.generateTokensInTx(tx, userId, email, role));
+  }
+
+  private async generateTokensInTx(
+    tx: Prisma.TransactionClient,
+    userId: string,
+    email: string,
+    role: UserRole,
+  ): Promise<AuthTokens> {
     const payload: JwtPayload = { sub: userId, email, role };
     const accessExpires = this.configService.get<string>('jwt.expiresIn', '15m');
     const refreshExpires = this.configService.get<string>('jwt.refreshExpiresIn', '7d');
@@ -206,7 +224,7 @@ export class AuthService {
 
     // Persist refresh token
     const expiresAt = this.parseExpiry(refreshExpires);
-    await this.prisma.refreshToken.create({
+    await tx.refreshToken.create({
       data: {
         token: refreshToken,
         userId,
@@ -235,6 +253,17 @@ export class AuthService {
   private parseExpiry(expiry: string): Date {
     const ms = this.parseExpirySeconds(expiry) * 1000;
     return new Date(Date.now() + ms);
+  }
+
+  private normalizePhone(phone: string): string {
+    const digits = phone.replace(/\D/g, '');
+    if (digits.startsWith('62')) {
+      return `+${digits}`;
+    }
+    if (digits.startsWith('0')) {
+      return `+62${digits.slice(1)}`;
+    }
+    return `+${digits}`;
   }
 
   private parseExpirySeconds(expiry: string): number {

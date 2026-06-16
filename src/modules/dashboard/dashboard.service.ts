@@ -15,8 +15,10 @@ export class DashboardService {
 
   async getOverview() {
     const now = new Date();
-    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
-    const previousMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+    const previousMonthStart = new Date(
+      Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 1),
+    );
 
     const [revenue, ordersThisMonth, ordersPreviousMonth, customers, products, recentOrders] =
       await Promise.all([
@@ -55,8 +57,8 @@ export class DashboardService {
   async getRevenueChart(period: '7d' | '30d' | '90d' | '1y' = '30d') {
     const days = this.periodToDays(period);
     const start = new Date();
-    start.setDate(start.getDate() - days + 1);
-    start.setHours(0, 0, 0, 0);
+    start.setUTCDate(start.getUTCDate() - days + 1);
+    start.setUTCHours(0, 0, 0, 0);
 
     const orders = await this.prisma.order.findMany({
       where: { status: { in: REVENUE_STATUSES }, createdAt: { gte: start } },
@@ -87,6 +89,7 @@ export class DashboardService {
   async getTopProducts(limit = 10) {
     const grouped = await this.prisma.orderItem.groupBy({
       by: ['productId'],
+      where: { order: { status: { in: REVENUE_STATUSES } } },
       _sum: { quantity: true, subtotal: true },
       orderBy: { _sum: { quantity: 'desc' } },
       take: limit,

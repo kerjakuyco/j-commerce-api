@@ -31,6 +31,15 @@ export class BannersController {
     return this.bannersService.findAll();
   }
 
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @ApiBearerAuth('access-token')
+  @Roles(UserRole.ADMIN)
+  @Get('admin/all')
+  @ApiOperation({ summary: 'List all banners including inactive (admin only)' })
+  findAllAdmin() {
+    return this.bannersService.findAllAdmin();
+  }
+
   @Public()
   @Get(':id')
   @ApiOperation({ summary: 'Get active banner by ID' })

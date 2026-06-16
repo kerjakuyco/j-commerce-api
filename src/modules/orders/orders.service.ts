@@ -42,6 +42,15 @@ export class OrdersService {
   constructor(private readonly prisma: PrismaService) {}
 
   async create(userId: string, dto: CreateOrderDto): Promise<OrderWithRelations> {
+    const seen = new Set<string>();
+    for (const item of dto.items) {
+      const key = `${item.productId}:${item.variantId}`;
+      if (seen.has(key)) {
+        throw new BadRequestException('Item duplikat ditemukan dalam pesanan');
+      }
+      seen.add(key);
+    }
+
     const shippingMethod = dto.shippingMethod ?? ShippingMethod.REGULAR;
     const shippingCost = new Prisma.Decimal(this.getShippingCost(shippingMethod));
 
@@ -79,11 +88,6 @@ export class OrdersService {
         if (updated.count === 0) {
           throw new BadRequestException(`Stok ${variant.product.name} baru saja berubah`);
         }
-
-        await tx.product.update({
-          where: { id: variant.productId },
-          data: { totalSold: { increment: item.quantity } },
-        });
 
         const price = new Prisma.Decimal(variant.price);
         const lineSubtotal = price.mul(item.quantity);
@@ -254,12 +258,30 @@ export class OrdersService {
       );
     }
 
+    const allowedTransitions: Record<OrderStatus, OrderStatus[]> = {
+      [OrderStatus.PENDING]: [OrderStatus.PAID],
+      [OrderStatus.PAID]: [OrderStatus.PACKED],
+      [OrderStatus.PACKED]: [OrderStatus.SHIPPED],
+      [OrderStatus.SHIPPED]: [OrderStatus.DELIVERED],
+      [OrderStatus.DELIVERED]: [],
+      [OrderStatus.CANCELLED]: [],
+    };
+
+    if (!allowedTransitions[order.status]?.includes(dto.status)) {
+      throw new BadRequestException(
+        `Status pesanan tidak bisa diubah dari ${order.status} ke ${dto.status}`,
+      );
+    }
+
+    if (dto.status === OrderStatus.PAID && order.paymentStatus !== PaymentStatus.PAID) {
+      throw new BadRequestException('Pesanan belum dibayar');
+    }
+
     const data: Prisma.OrderUpdateInput = {
       status: dto.status,
       trackingNumber: dto.trackingNumber,
       ...this.statusTimestamp(dto.status),
     };
-    if (dto.status === OrderStatus.PAID) data.paymentStatus = PaymentStatus.PAID;
 
     return this.updateOrderAndNotify(order, data);
   }
@@ -348,10 +370,12 @@ export class OrdersService {
         where: { id: item.variantId },
         data: { stock: { increment: item.quantity } },
       });
-      await tx.product.update({
-        where: { id: item.productId },
-        data: { totalSold: { decrement: item.quantity } },
-      });
+      if (order.paymentStatus === PaymentStatus.PAID) {
+        await tx.product.update({
+          where: { id: item.productId },
+          data: { totalSold: { decrement: item.quantity } },
+        });
+      }
     }
   }
 

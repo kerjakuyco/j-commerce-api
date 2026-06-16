@@ -71,13 +71,10 @@ Dokumen ini adalah **satu-satunya sumber kebenaran** untuk semua teknologi, pack
 | `jest` | `^29.7.0` | Test runner |
 | `supertest` | `^7.0.0` | HTTP E2E testing |
 | `jest-mock-extended` | `^4.0.0-beta1` | Prisma mocking |
-| `eslint` | `^9.10.0` | Linting |
-| `@typescript-eslint/eslint-plugin` | `^8.0.0` | TS lint rules |
-| `@typescript-eslint/parser` | `^8.0.0` | TS parser |
+| `eslint` | `^10.5.0` | Linting |
+| `@typescript-eslint/eslint-plugin` | `^8.61.1` | TS lint rules |
+| `@typescript-eslint/parser` | `^8.61.1` | TS parser |
 | `prettier` | `^3.3.3` | Code formatting |
-| `eslint-config-prettier` | `^9.1.0` | Disable ESLint formatting rules |
-| `eslint-plugin-prettier` | `^5.2.1` | Run Prettier as ESLint rule |
-| `husky` | `^9.1.6` | Git hooks (optional) |
 
 ## 4. Environment Variables
 

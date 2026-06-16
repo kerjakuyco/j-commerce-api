@@ -79,6 +79,25 @@ export class UsersService {
       throw new ForbiddenException('Role dan status aktif hanya bisa diubah admin');
     }
 
+    if (isAdmin) {
+      if (actor.id === target.id) {
+        if (dto.isActive === false) {
+          throw new ForbiddenException('Admin tidak bisa menonaktifkan akun sendiri');
+        }
+        if (dto.role !== undefined && dto.role !== UserRole.ADMIN) {
+          throw new ForbiddenException('Admin tidak bisa menurunkan role sendiri');
+        }
+      }
+      if (target.role === UserRole.ADMIN) {
+        if (dto.isActive === false) {
+          throw new ForbiddenException('Akun admin tidak bisa dinonaktifkan');
+        }
+        if (dto.role !== undefined && dto.role !== UserRole.ADMIN) {
+          throw new ForbiddenException('Role admin tidak bisa diturunkan');
+        }
+      }
+    }
+
     if (dto.email && dto.email !== target.email) {
       const existing = await this.prisma.user.findUnique({ where: { email: dto.email } });
       if (existing) throw new ConflictException('Email sudah digunakan');

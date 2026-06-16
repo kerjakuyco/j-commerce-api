@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreateCategoryDto, UpdateCategoryDto } from './dto/create-category.dto';
@@ -30,7 +30,14 @@ export class CategoriesService {
   }
 
   async create(dto: CreateCategoryDto) {
-    return this.prisma.category.create({ data: dto });
+    try {
+      return await this.prisma.category.create({ data: dto });
+    } catch (e) {
+      if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') {
+        throw new ConflictException('Slug kategori sudah digunakan');
+      }
+      throw e;
+    }
   }
 
   async update(id: string, dto: UpdateCategoryDto) {
@@ -52,7 +59,7 @@ export class CategoriesService {
       where: { categoryId: id, deletedAt: null },
     });
     if (productsCount > 0) {
-      throw new NotFoundException(
+      throw new ConflictException(
         `Tidak bisa hapus: kategori masih punya ${productsCount} produk. Hapus atau pindahkan produk terlebih dahulu.`,
       );
     }

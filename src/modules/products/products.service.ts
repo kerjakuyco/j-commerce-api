@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma, Product } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreateProductDto, QueryProductDto, UpdateProductDto } from './dto/product.dto';
@@ -37,9 +37,25 @@ export class ProductsService {
       ];
     }
     if (minPrice !== undefined || maxPrice !== undefined) {
-      where.basePrice = {};
-      if (minPrice !== undefined) where.basePrice.gte = minPrice;
-      if (maxPrice !== undefined) where.basePrice.lte = maxPrice;
+      const basePriceFilter: Prisma.DecimalFilter = {};
+      const discountPriceFilter: Prisma.DecimalNullableFilter = {};
+      if (minPrice !== undefined) {
+        basePriceFilter.gte = minPrice;
+        discountPriceFilter.gte = minPrice;
+      }
+      if (maxPrice !== undefined) {
+        basePriceFilter.lte = maxPrice;
+        discountPriceFilter.lte = maxPrice;
+      }
+
+      where.AND = [
+        {
+          OR: [
+            { discountPrice: null, basePrice: basePriceFilter },
+            { discountPrice: { ...discountPriceFilter, not: null } },
+          ],
+        },
+      ];
     }
     if (minRating !== undefined) where.rating = { gte: minRating };
 
@@ -139,6 +155,7 @@ export class ProductsService {
       where: {
         OR: [{ id: idOrSlug }, { slug: idOrSlug }],
         deletedAt: null,
+        isActive: true,
       },
       include: {
         category: true,
@@ -167,27 +184,37 @@ export class ProductsService {
 
   async create(dto: CreateProductDto): Promise<Product> {
     const { variants, images, ...data } = dto;
-    return this.prisma.product.create({
-      data: {
-        ...data,
-        basePrice: new Prisma.Decimal(data.basePrice),
-        discountPrice: data.discountPrice ? new Prisma.Decimal(data.discountPrice) : null,
-        flashSaleEndsAt: data.flashSaleEndsAt ? new Date(data.flashSaleEndsAt) : null,
-        variants: variants
-          ? {
-              create: variants.map((v) => ({
-                ...v,
-                price: new Prisma.Decimal(v.price),
-              })),
-            }
-          : undefined,
-        images: images
-          ? {
-              create: images,
-            }
-          : undefined,
-      },
-    });
+    try {
+      return await this.prisma.product.create({
+        data: {
+          ...data,
+          basePrice: new Prisma.Decimal(data.basePrice),
+          discountPrice:
+            data.discountPrice !== undefined
+              ? new Prisma.Decimal(data.discountPrice)
+              : null,
+          flashSaleEndsAt: data.flashSaleEndsAt ? new Date(data.flashSaleEndsAt) : null,
+          variants: variants
+            ? {
+                create: variants.map((v) => ({
+                  ...v,
+                  price: new Prisma.Decimal(v.price),
+                })),
+              }
+            : undefined,
+          images: images
+            ? {
+                create: images,
+              }
+            : undefined,
+        },
+      });
+    } catch (e) {
+      if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') {
+        throw new ConflictException('Slug atau nama produk sudah digunakan');
+      }
+      throw e;
+    }
   }
 
   async update(id: string, dto: UpdateProductDto): Promise<Product> {

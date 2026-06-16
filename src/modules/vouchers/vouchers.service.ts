@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma, Voucher, VoucherType } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import {
@@ -19,10 +19,9 @@ export class VouchersService {
       isActive: true,
       startsAt: { lte: now },
       expiresAt: { gte: now },
-      usedCount: { lt: this.prisma.voucher.fields.quota },
     };
 
-    const [data, total] = await Promise.all([
+    const [rows, total] = await Promise.all([
       this.prisma.voucher.findMany({
         where,
         orderBy: { expiresAt: 'asc' },
@@ -31,6 +30,8 @@ export class VouchersService {
       }),
       this.prisma.voucher.count({ where }),
     ]);
+
+    const data = rows.filter((voucher) => voucher.usedCount < voucher.quota);
 
     return { data, meta: { total, page, limit, totalPages: Math.ceil(total / limit) } };
   }
@@ -47,9 +48,16 @@ export class VouchersService {
   }
 
   async create(dto: CreateVoucherDto): Promise<Voucher> {
-    return this.prisma.voucher.create({
-      data: this.toPrismaData(dto) as Prisma.VoucherUncheckedCreateInput,
-    });
+    try {
+      return await this.prisma.voucher.create({
+        data: this.toPrismaData(dto) as Prisma.VoucherUncheckedCreateInput,
+      });
+    } catch (e) {
+      if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') {
+        throw new ConflictException('Kode voucher sudah digunakan');
+      }
+      throw e;
+    }
   }
 
   async update(id: string, dto: UpdateVoucherDto): Promise<Voucher> {

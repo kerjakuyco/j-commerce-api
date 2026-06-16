@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreateVariantDto, UpdateVariantDto } from './dto/variant.dto';
@@ -44,6 +44,19 @@ export class ProductVariantsService {
   }
 
   async remove(id: string): Promise<{ message: string }> {
+    const variant = await this.prisma.productVariant.findUnique({
+      where: { id },
+      include: { _count: { select: { orderItems: true } } },
+    });
+    if (!variant) {
+      throw new NotFoundException('Varian produk tidak ditemukan');
+    }
+    if ((variant._count?.orderItems ?? 0) > 0) {
+      throw new ConflictException(
+        'Varian sudah pernah dipesan dan tidak bisa dihapus demi menjaga riwayat pesanan',
+      );
+    }
+
     try {
       await this.prisma.productVariant.delete({ where: { id } });
     } catch (e) {

@@ -30,7 +30,7 @@ Lihat [`ARCHITECTURE.md`](./ARCHITECTURE.md) untuk detail.
 
 ## Features
 
-50+ REST endpoints di 17 modules. Lihat [`FEATURES.md`](./FEATURES.md).
+50+ REST endpoints di 18 modules. Lihat [`FEATURES.md`](./FEATURES.md).
 
 Highlights:
 - **Auth**: Register, login, JWT access + refresh tokens, role-based access (customer/admin)
@@ -57,7 +57,7 @@ src/
     ├── products/
     ├── orders/
     ├── payments/
-    └── ... (17 modules total)
+    └── ... (18 modules total)
 prisma/
 ├── schema.prisma
 ├── migrations/
@@ -158,8 +158,8 @@ flutter run --dart-define=API_BASE_URL=http://192.168.1.100:3000/api/v1
 ## Related Repositories
 
 - **`j-commerce`** (mobile) — published ✅
-- **`j-commerce-api`** (this repo) — in development 🚧
-- **`j-commerce-admin`** — planned
+- **`j-commerce-api`** (this repo) — implemented ✅
+- **`j-commerce-admin`** — implemented ✅
 
 ## License
 

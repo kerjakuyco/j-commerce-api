@@ -126,7 +126,7 @@ export class PaymentsService {
     if (!order) throw new NotFoundException('Pesanan tidak ditemukan');
 
     const grossAmount = new Prisma.Decimal(dto.gross_amount);
-    if (!grossAmount.equals(order.total)) {
+    if (!this.amountsMatch(grossAmount, order.total)) {
       throw new BadRequestException('Nominal pembayaran tidak sesuai pesanan');
     }
 
@@ -146,6 +146,9 @@ export class PaymentsService {
     }
 
     await this.prisma.$transaction(async (tx) => {
+      // Lock order row to prevent concurrent/out-of-order notification races
+      await tx.$executeRaw`SELECT id FROM orders WHERE id = ${order.id} FOR UPDATE`;
+
       await tx.payment.upsert({
         where: { orderId: order.id },
         create: {
@@ -167,14 +170,18 @@ export class PaymentsService {
       });
 
       if (paymentStatus === PaymentStatus.PAID) {
-        await tx.order.update({
-          where: { id: order.id },
+        const updated = await tx.order.update({
+          where: { id: order.id, paymentStatus: { not: PaymentStatus.PAID } },
           data: {
             paymentStatus,
             paidAt,
             ...(order.status === OrderStatus.PENDING ? { status: OrderStatus.PAID } : {}),
           },
         });
+
+        if (updated) {
+          await this.incrementTotalSold(tx, order);
+        }
 
         await tx.notification.create({
           data: {
@@ -221,6 +228,11 @@ export class PaymentsService {
     return { message: 'Notifikasi Midtrans diproses' };
   }
 
+  private amountsMatch(a: Prisma.Decimal.Value, b: Prisma.Decimal.Value): boolean {
+    const diff = new Prisma.Decimal(a).minus(new Prisma.Decimal(b)).abs();
+    return diff.lessThanOrEqualTo(0.01);
+  }
+
   private canReuseSnapToken(
     order: Prisma.OrderGetPayload<{ include: typeof PAYMENT_ORDER_INCLUDE }>,
     now: Date,
@@ -236,6 +248,18 @@ export class PaymentsService {
     return expiredAt > now;
   }
 
+  private async incrementTotalSold(
+    tx: Prisma.TransactionClient,
+    order: Prisma.OrderGetPayload<{ include: typeof PAYMENT_ORDER_INCLUDE }>,
+  ): Promise<void> {
+    for (const item of order.items) {
+      await tx.product.update({
+        where: { id: item.productId },
+        data: { totalSold: { increment: item.quantity } },
+      });
+    }
+  }
+
   private async restoreStock(
     tx: Prisma.TransactionClient,
     order: Prisma.OrderGetPayload<{ include: typeof PAYMENT_ORDER_INCLUDE }>,
@@ -245,10 +269,12 @@ export class PaymentsService {
         where: { id: item.variantId },
         data: { stock: { increment: item.quantity } },
       });
-      await tx.product.update({
-        where: { id: item.productId },
-        data: { totalSold: { decrement: item.quantity } },
-      });
+      if (order.paymentStatus === PaymentStatus.PAID) {
+        await tx.product.update({
+          where: { id: item.productId },
+          data: { totalSold: { decrement: item.quantity } },
+        });
+      }
     }
   }
 
