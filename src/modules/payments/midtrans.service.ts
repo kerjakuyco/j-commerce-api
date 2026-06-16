@@ -76,6 +76,8 @@ export class MidtransService {
 
   verifySignature(notification: MidtransNotificationDto): boolean {
     const serverKey = this.configService.get<string>('midtrans.serverKey', '');
+    if (!serverKey || serverKey.includes('XXXXXXXX')) return false;
+
     const input = `${notification.order_id}${notification.status_code}${notification.gross_amount}${serverKey}`;
     const expected = createHash('sha512').update(input).digest('hex');
 

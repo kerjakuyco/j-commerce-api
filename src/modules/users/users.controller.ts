@@ -56,14 +56,18 @@ export class UsersController {
   @Delete(':id')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Soft-delete user (admin only)' })
-  remove(@Param('id') id: string) {
-    return this.usersService.remove(id);
+  remove(@Param('id') id: string, @CurrentUser() user: AuthenticatedUser) {
+    return this.usersService.remove(id, user);
   }
 
   @Roles(UserRole.ADMIN)
   @Patch(':id/active')
   @ApiOperation({ summary: 'Toggle user active status (admin only)' })
-  toggleActive(@Param('id') id: string, @Body() dto: ToggleActiveDto) {
-    return this.usersService.toggleActive(id, dto.isActive);
+  toggleActive(
+    @Param('id') id: string,
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: ToggleActiveDto,
+  ) {
+    return this.usersService.toggleActive(id, user, dto.isActive);
   }
 }

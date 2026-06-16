@@ -13,11 +13,17 @@ import { ChangePasswordDto } from './dto/change-password.dto';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
 import { JwtPayload } from './strategies/jwt.strategy';
+import { UserResponseEntity } from './entities/auth-response.entity';
 
 export interface AuthTokens {
   accessToken: string;
   refreshToken: string;
   expiresIn: number;
+}
+
+interface RefreshJwtPayload {
+  sub: string;
+  type: string;
 }
 
 @Injectable()
@@ -31,7 +37,7 @@ export class AuthService {
   // ============================================
   // REGISTER
   // ============================================
-  async register(dto: RegisterDto): Promise<{ user: User; tokens: AuthTokens }> {
+  async register(dto: RegisterDto): Promise<{ user: UserResponseEntity; tokens: AuthTokens }> {
     const existing = await this.prisma.user.findUnique({
       where: { email: dto.email },
     });
@@ -51,13 +57,13 @@ export class AuthService {
     });
 
     const tokens = await this.generateTokens(user.id, user.email, user.role);
-    return { user, tokens };
+    return { user: this.toUserResponse(user), tokens };
   }
 
   // ============================================
   // LOGIN
   // ============================================
-  async login(dto: LoginDto): Promise<{ user: User; tokens: AuthTokens }> {
+  async login(dto: LoginDto): Promise<{ user: UserResponseEntity; tokens: AuthTokens }> {
     const user = await this.prisma.user.findUnique({
       where: { email: dto.email },
     });
@@ -70,41 +76,52 @@ export class AuthService {
     }
 
     const tokens = await this.generateTokens(user.id, user.email, user.role);
-    return { user, tokens };
+    return { user: this.toUserResponse(user), tokens };
   }
 
   // ============================================
   // REFRESH TOKENS
   // ============================================
   async refreshTokens(refreshToken: string): Promise<AuthTokens> {
-    let payload: JwtPayload;
+    let payload: RefreshJwtPayload;
     try {
-      payload = await this.jwtService.verifyAsync<JwtPayload>(refreshToken, {
+      payload = await this.jwtService.verifyAsync<RefreshJwtPayload>(refreshToken, {
         secret: this.configService.get<string>('jwt.refreshSecret'),
       });
     } catch {
+      throw new UnauthorizedException('Refresh token tidak valid');
+    }
+    if (payload.type !== 'refresh') {
       throw new UnauthorizedException('Refresh token tidak valid');
     }
 
     const stored = await this.prisma.refreshToken.findUnique({
       where: { token: refreshToken },
     });
-    if (!stored || stored.revokedAt || stored.expiresAt < new Date()) {
+    if (
+      !stored ||
+      stored.userId !== payload.sub ||
+      stored.revokedAt ||
+      stored.expiresAt < new Date()
+    ) {
       throw new UnauthorizedException('Refresh token sudah tidak berlaku');
     }
 
-    const user = await this.prisma.user.findUnique({
-      where: { id: payload.sub },
+    const user = await this.prisma.user.findFirst({
+      where: { id: payload.sub, deletedAt: null },
     });
     if (!user || !user.isActive) {
       throw new UnauthorizedException('User tidak aktif');
     }
 
     // Rotate: revoke old, issue new
-    await this.prisma.refreshToken.update({
-      where: { id: stored.id },
+    const revoked = await this.prisma.refreshToken.updateMany({
+      where: { id: stored.id, revokedAt: null },
       data: { revokedAt: new Date() },
     });
+    if (revoked.count === 0) {
+      throw new UnauthorizedException('Refresh token sudah tidak berlaku');
+    }
 
     return this.generateTokens(user.id, user.email, user.role);
   }
@@ -159,12 +176,12 @@ export class AuthService {
   // ============================================
   // GET PROFILE
   // ============================================
-  async getProfile(userId: string): Promise<User> {
+  async getProfile(userId: string): Promise<UserResponseEntity> {
     const user = await this.prisma.user.findUnique({ where: { id: userId } });
     if (!user) {
       throw new NotFoundException('User tidak ditemukan');
     }
-    return user;
+    return this.toUserResponse(user);
   }
 
   // ============================================
@@ -201,6 +218,18 @@ export class AuthService {
     const expiresInSeconds = this.parseExpirySeconds(accessExpires);
 
     return { accessToken, refreshToken, expiresIn: expiresInSeconds };
+  }
+
+  private toUserResponse(user: User): UserResponseEntity {
+    return {
+      id: user.id,
+      email: user.email,
+      name: user.name,
+      phone: user.phone,
+      avatar: user.avatar,
+      role: user.role,
+      createdAt: user.createdAt,
+    };
   }
 
   private parseExpiry(expiry: string): Date {

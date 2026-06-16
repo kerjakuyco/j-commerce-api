@@ -4,7 +4,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { Prisma, User, UserRole } from '@prisma/client';
+import { Prisma, UserRole } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuthenticatedUser } from '../../common/decorators/current-user.decorator';
 import { QueryUserDto } from './dto/query-user.dto';
@@ -22,6 +22,8 @@ const USER_SELECT = {
   updatedAt: true,
   deletedAt: true,
 } satisfies Prisma.UserSelect;
+
+type UserResponse = Prisma.UserGetPayload<{ select: typeof USER_SELECT }>;
 
 @Injectable()
 export class UsersService {
@@ -93,22 +95,34 @@ export class UsersService {
     return this.prisma.user.update({ where: { id }, data, select: USER_SELECT });
   }
 
-  async remove(id: string): Promise<User> {
-    await this.findOne(id);
+  async remove(id: string, actor: AuthenticatedUser): Promise<UserResponse> {
+    const target = await this.findOne(id);
+    this.assertAdminCanDeactivate(actor, target);
 
     return this.prisma.user.update({
       where: { id },
       data: { deletedAt: new Date(), isActive: false },
+      select: USER_SELECT,
     });
   }
 
-  async toggleActive(id: string, isActive: boolean) {
-    await this.findOne(id);
+  async toggleActive(id: string, actor: AuthenticatedUser, isActive: boolean) {
+    const target = await this.findOne(id);
+    if (!isActive) this.assertAdminCanDeactivate(actor, target);
 
     return this.prisma.user.update({
       where: { id },
       data: { isActive },
       select: USER_SELECT,
     });
+  }
+
+  private assertAdminCanDeactivate(actor: AuthenticatedUser, target: UserResponse): void {
+    if (actor.id === target.id) {
+      throw new ForbiddenException('Admin tidak bisa menonaktifkan akun sendiri');
+    }
+    if (target.role === UserRole.ADMIN) {
+      throw new ForbiddenException('Akun admin tidak bisa dinonaktifkan');
+    }
   }
 }

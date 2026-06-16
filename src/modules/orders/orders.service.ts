@@ -101,7 +101,7 @@ export class OrdersService {
       }
 
       const voucher = dto.voucherCode
-        ? await this.validateVoucher(tx, dto.voucherCode, subtotal)
+        ? await this.reserveVoucher(tx, dto.voucherCode, subtotal)
         : null;
       const discount = voucher ? this.calculateDiscount(voucher, subtotal) : new Prisma.Decimal(0);
       const total = subtotal.add(shippingCost).sub(discount);
@@ -123,13 +123,6 @@ export class OrdersService {
         },
         include: ORDER_INCLUDE,
       });
-
-      if (voucher) {
-        await tx.voucher.update({
-          where: { id: voucher.id },
-          data: { usedCount: { increment: 1 } },
-        });
-      }
 
       await tx.cartItem.deleteMany({
         where: {
@@ -198,15 +191,18 @@ export class OrdersService {
     }
 
     return this.prisma.$transaction(async (tx) => {
-      await this.restoreStock(tx, order);
       const paymentStatus =
         order.paymentStatus === PaymentStatus.PAID ? PaymentStatus.REFUNDED : PaymentStatus.EXPIRED;
-
-      const updated = await tx.order.update({
-        where: { id: order.id },
+      const cancelled = await tx.order.updateMany({
+        where: { id: order.id, status: { in: [OrderStatus.PENDING, OrderStatus.PAID] } },
         data: { status: OrderStatus.CANCELLED, paymentStatus, cancelledAt: new Date() },
-        include: ORDER_INCLUDE,
       });
+      if (cancelled.count === 0) {
+        throw new BadRequestException('Pesanan tidak bisa dibatalkan pada status ini');
+      }
+
+      await this.restoreStock(tx, order);
+      await this.restoreVoucher(tx, order);
 
       await tx.payment.updateMany({
         where: { orderId: order.id },
@@ -220,6 +216,12 @@ export class OrdersService {
         'Pesanan dibatalkan',
         `Pesanan ${order.orderNumber} berhasil dibatalkan.`,
       );
+
+      const updated = await tx.order.findUnique({
+        where: { id: order.id },
+        include: ORDER_INCLUDE,
+      });
+      if (!updated) throw new NotFoundException('Pesanan tidak ditemukan');
 
       return updated;
     });
@@ -246,6 +248,11 @@ export class OrdersService {
       include: ORDER_INCLUDE,
     });
     if (!order) throw new NotFoundException('Pesanan tidak ditemukan');
+    if (dto.status === OrderStatus.CANCELLED) {
+      throw new BadRequestException(
+        'Gunakan endpoint cancel agar stok dan pembayaran diproses benar',
+      );
+    }
 
     const data: Prisma.OrderUpdateInput = {
       status: dto.status,
@@ -253,7 +260,6 @@ export class OrdersService {
       ...this.statusTimestamp(dto.status),
     };
     if (dto.status === OrderStatus.PAID) data.paymentStatus = PaymentStatus.PAID;
-    if (dto.status === OrderStatus.CANCELLED) data.cancelledAt = new Date();
 
     return this.updateOrderAndNotify(order, data);
   }
@@ -281,7 +287,7 @@ export class OrdersService {
     });
   }
 
-  private async validateVoucher(
+  private async reserveVoucher(
     tx: Prisma.TransactionClient,
     code: string,
     subtotal: Prisma.Decimal,
@@ -300,6 +306,20 @@ export class OrdersService {
 
     if (subtotal.lessThan(voucher.minPurchase)) {
       throw new BadRequestException('Subtotal belum memenuhi minimal pembelian voucher');
+    }
+
+    const reserved = await tx.voucher.updateMany({
+      where: {
+        id: voucher.id,
+        isActive: true,
+        startsAt: { lte: now },
+        expiresAt: { gte: now },
+        usedCount: { lt: voucher.quota },
+      },
+      data: { usedCount: { increment: 1 } },
+    });
+    if (reserved.count === 0) {
+      throw new BadRequestException('Voucher tidak valid atau sudah habis');
     }
 
     return voucher;
@@ -333,6 +353,17 @@ export class OrdersService {
         data: { totalSold: { decrement: item.quantity } },
       });
     }
+  }
+
+  private async restoreVoucher(
+    tx: Prisma.TransactionClient,
+    order: OrderWithRelations,
+  ): Promise<void> {
+    if (!order.voucherId) return;
+    await tx.voucher.updateMany({
+      where: { id: order.voucherId, usedCount: { gt: 0 } },
+      data: { usedCount: { decrement: 1 } },
+    });
   }
 
   private statusTimestamp(status: OrderStatus): Prisma.OrderUpdateInput {

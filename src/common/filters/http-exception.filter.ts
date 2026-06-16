@@ -47,7 +47,6 @@ export class HttpExceptionFilter implements ExceptionFilter {
       error = 'Validation Error';
     } else if (exception instanceof Error) {
       this.logger.error(`Unhandled error: ${exception.message}`, exception.stack);
-      message = exception.message;
     } else {
       this.logger.error(`Unknown error: ${String(exception)}`);
     }

@@ -2,7 +2,7 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import { ConfigService } from '@nestjs/config';
 import { randomUUID } from 'crypto';
 import { mkdir, unlink, writeFile } from 'fs/promises';
-import { basename, extname, join } from 'path';
+import { basename, join } from 'path';
 
 export interface UploadedFileEntity {
   url: string;
@@ -13,19 +13,23 @@ export interface UploadedFileEntity {
 
 const ALLOWED_MIME_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
 
+interface DetectedImageType {
+  mimetype: string;
+  extension: string;
+}
+
 @Injectable()
 export class UploadService {
   constructor(private readonly configService: ConfigService) {}
 
   async save(file: Express.Multer.File | undefined): Promise<UploadedFileEntity> {
     if (!file) throw new BadRequestException('File wajib diunggah');
-    this.validateImage(file);
+    const imageType = this.validateImage(file);
 
     const uploadDir = this.configService.get<string>('upload.dir', './uploads');
     await mkdir(uploadDir, { recursive: true });
 
-    const extension = this.getExtension(file);
-    const filename = `${randomUUID()}${extension}`;
+    const filename = `${randomUUID()}${imageType.extension}`;
     const filepath = join(uploadDir, filename);
     await writeFile(filepath, file.buffer);
 
@@ -35,7 +39,7 @@ export class UploadService {
       url: `${baseUrl}/uploads/${filename}`,
       filename,
       size: file.size,
-      mimetype: file.mimetype,
+      mimetype: imageType.mimetype,
     };
   }
 
@@ -69,7 +73,7 @@ export class UploadService {
     return { message: 'File berhasil dihapus' };
   }
 
-  private validateImage(file: Express.Multer.File): void {
+  private validateImage(file: Express.Multer.File): DetectedImageType {
     if (!ALLOWED_MIME_TYPES.has(file.mimetype)) {
       throw new BadRequestException('Format file harus jpg, png, atau webp');
     }
@@ -79,20 +83,42 @@ export class UploadService {
     if (file.size > maxSizeBytes) {
       throw new BadRequestException(`Ukuran file maksimal ${maxSizeMb} MB`);
     }
+
+    const imageType = this.detectImageType(file.buffer);
+    if (!imageType || imageType.mimetype !== file.mimetype) {
+      throw new BadRequestException('Konten file tidak sesuai format gambar');
+    }
+
+    return imageType;
   }
 
-  private getExtension(file: Express.Multer.File): string {
-    const originalExtension = extname(file.originalname).toLowerCase();
-    if (originalExtension) return originalExtension;
-
-    switch (file.mimetype) {
-      case 'image/png':
-        return '.png';
-      case 'image/webp':
-        return '.webp';
-      case 'image/jpeg':
-      default:
-        return '.jpg';
+  private detectImageType(buffer: Buffer): DetectedImageType | null {
+    if (buffer.length >= 4 && buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff) {
+      return { mimetype: 'image/jpeg', extension: '.jpg' };
     }
+
+    if (
+      buffer.length >= 8 &&
+      buffer[0] === 0x89 &&
+      buffer[1] === 0x50 &&
+      buffer[2] === 0x4e &&
+      buffer[3] === 0x47 &&
+      buffer[4] === 0x0d &&
+      buffer[5] === 0x0a &&
+      buffer[6] === 0x1a &&
+      buffer[7] === 0x0a
+    ) {
+      return { mimetype: 'image/png', extension: '.png' };
+    }
+
+    if (
+      buffer.length >= 12 &&
+      buffer.subarray(0, 4).toString('ascii') === 'RIFF' &&
+      buffer.subarray(8, 12).toString('ascii') === 'WEBP'
+    ) {
+      return { mimetype: 'image/webp', extension: '.webp' };
+    }
+
+    return null;
   }
 }
