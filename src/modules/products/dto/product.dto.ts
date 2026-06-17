@@ -209,3 +209,18 @@ export class QueryProductDto {
   @IsString()
   sort?: 'newest' | 'price_asc' | 'price_desc' | 'rating' | 'sold';
 }
+
+/**
+ * Shared limit query for the public list-style product endpoints
+ * (featured / flash-sale / related). Bounds prevent NaN/invalid/oversized
+ * `take` values from reaching Prisma (500) or causing unbounded scans (DoS).
+ */
+export class ProductLimitQueryDto {
+  @ApiProperty({ required: false, minimum: 1, maximum: 50, default: 10 })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(50)
+  limit?: number;
+}

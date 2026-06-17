@@ -16,7 +16,7 @@ import { ApiProperty } from '@nestjs/swagger';
 import { AuthenticatedUser, CurrentUser } from '../../common/decorators/current-user.decorator';
 import { Public } from '../../common/decorators/public.decorator';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
-import { CreateReviewDto } from './dto/create-review.dto';
+import { CreateReviewDto, UpdateReviewDto } from './dto/create-review.dto';
 import { ReviewsService } from './reviews.service';
 
 class QueryReviewDto {
@@ -75,7 +75,7 @@ export class ReviewsController {
   update(
     @Param('id') id: string,
     @CurrentUser() user: AuthenticatedUser,
-    @Body() dto: Partial<CreateReviewDto>,
+    @Body() dto: UpdateReviewDto,
   ) {
     return this.reviewsService.update(id, user.id, dto);
   }

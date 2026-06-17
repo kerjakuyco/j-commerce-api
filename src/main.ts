@@ -1,4 +1,3 @@
-import { ValidationPipe } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
 import { NestExpressApplication } from '@nestjs/platform-express';
@@ -8,6 +7,7 @@ import helmet from 'helmet';
 import { AppModule } from './app.module';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter';
 import { LoggingInterceptor } from './common/interceptors/logging.interceptor';
+import { RouteAwareValidationPipe } from './common/pipes/route-aware-validation.pipe';
 
 async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule, {
@@ -25,7 +25,14 @@ async function bootstrap() {
   // Static assets for uploaded files
   app.useStaticAssets(uploadDir, { prefix: '/uploads/' });
 
-  app.use(helmet());
+  // Helmet: keep protections in production. In non-production Swagger UI is
+  // enabled at /api/docs and its inline scripts break under Helmet's default
+  // CSP (script-src 'self'), so disable CSP only when docs are served.
+  app.use(
+    helmet({
+      contentSecurityPolicy: nodeEnv === 'production' ? undefined : false,
+    }),
+  );
   app.use(compression());
 
   // CORS
@@ -40,17 +47,13 @@ async function bootstrap() {
     allowedHeaders: ['Content-Type', 'Authorization'],
   });
 
-  // Global validation pipe — DTO validation
-  app.useGlobalPipes(
-    new ValidationPipe({
-      whitelist: true,
-      forbidNonWhitelisted: true,
-      transform: true,
-      transformOptions: {
-        enableImplicitConversion: true,
-      },
-    }),
-  );
+  // Global validation pipe — DTO validation. RouteAwareValidationPipe keeps
+  // the strict profile (whitelist + forbidNonWhitelisted + transform) app-wide
+  // but switches to a loose profile (strip extras, no 400) for DTOs marked
+  // with @LooseValidation() — currently the Midtrans webhook DTO, which would
+  // otherwise be rejected by forbidNonWhitelisted before handleNotification
+  // runs (method-specific extra fields).
+  app.useGlobalPipes(new RouteAwareValidationPipe());
 
   // Global filters & interceptors
   app.useGlobalFilters(new HttpExceptionFilter());

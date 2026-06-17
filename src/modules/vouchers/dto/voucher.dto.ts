@@ -13,6 +13,7 @@ import {
   Max,
   MaxLength,
   Min,
+  ValidateIf,
 } from 'class-validator';
 
 export class CreateVoucherDto {
@@ -30,6 +31,10 @@ export class CreateVoucherDto {
   @Type(() => Number)
   @IsNumber({ maxDecimalPlaces: 2 })
   @Min(0)
+  // A PERCENTAGE voucher value > 100 would discount more than the purchase
+  // amount before the maxDiscount/purchase-amount caps kick in, so cap it.
+  @ValidateIf((o) => o.type === VoucherType.PERCENTAGE)
+  @Max(100)
   value!: number;
 
   @ApiProperty({ required: false })

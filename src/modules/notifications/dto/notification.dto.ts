@@ -1,17 +1,35 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { NotificationType } from '@prisma/client';
-import { Transform } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 import {
   IsBoolean,
   IsEnum,
+  IsInt,
   IsNotEmpty,
   IsObject,
   IsOptional,
   IsString,
+  Max,
   MaxLength,
+  Min,
 } from 'class-validator';
 
 export class QueryNotificationDto {
+  @ApiProperty({ required: false, default: 1 })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  page?: number = 1;
+
+  @ApiProperty({ required: false, default: 20 })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(100)
+  limit?: number = 20;
+
   @ApiProperty({ required: false })
   @IsOptional()
   @Transform(({ value }) => value === true || value === 'true')

@@ -1,4 +1,4 @@
-import { ApiProperty } from '@nestjs/swagger';
+import { ApiProperty, PartialType } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import {
   ArrayMaxSize,
@@ -32,3 +32,9 @@ export class CreateReviewDto {
   @IsUrl({}, { each: true })
   imageUrls?: string[];
 }
+
+// PartialType preserves all class-validator/class-transformer decorators so
+// the global ValidationPipe still validates @IsInt/@Min/@Max/@MaxLength and
+// applies the whitelist. Typing the param as `Partial<CreateReviewDto>`
+// erases the metatype to `Object` and the pipe silently skips validation.
+export class UpdateReviewDto extends PartialType(CreateReviewDto) {}

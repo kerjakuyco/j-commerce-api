@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Order, OrderItem, PaymentStatus } from '@prisma/client';
-import { createHash } from 'crypto';
+import { createHash, timingSafeEqual } from 'crypto';
 import midtransClient from 'midtrans-client';
 import { MidtransNotificationDto } from './dto/midtrans-notification.dto';
 
@@ -81,7 +81,14 @@ export class MidtransService {
     const input = `${notification.order_id}${notification.status_code}${notification.gross_amount}${serverKey}`;
     const expected = createHash('sha512').update(input).digest('hex');
 
-    return expected === notification.signature_key;
+    // Constant-time comparison to avoid leaking the expected signature via
+    // early-exit timing. Buffer.from defaults to UTF-8; both sides are hex
+    // strings. Guard length first (timingSafeEqual throws on mismatched
+    // Buffer lengths).
+    const expectedBuf = Buffer.from(expected, 'utf8');
+    const sigBuf = Buffer.from(notification.signature_key, 'utf8');
+    if (expectedBuf.length !== sigBuf.length) return false;
+    return timingSafeEqual(expectedBuf, sigBuf);
   }
 
   mapPaymentStatus(notification: MidtransNotificationDto): PaymentStatus {

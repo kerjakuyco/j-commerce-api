@@ -17,7 +17,7 @@ import { Public } from '../../common/decorators/public.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
-import { CreateProductDto, QueryProductDto, UpdateProductDto } from './dto/product.dto';
+import { CreateProductDto, ProductLimitQueryDto, QueryProductDto, UpdateProductDto } from './dto/product.dto';
 import { ProductsService } from './products.service';
 
 @ApiTags('products')
@@ -35,15 +35,15 @@ export class ProductsController {
   @Public()
   @Get('featured')
   @ApiOperation({ summary: 'Get featured products' })
-  findFeatured(@Query('limit') limit?: string) {
-    return this.productsService.findFeatured(limit ? parseInt(limit, 10) : undefined);
+  findFeatured(@Query() query: ProductLimitQueryDto) {
+    return this.productsService.findFeatured(query.limit);
   }
 
   @Public()
   @Get('flash-sale')
   @ApiOperation({ summary: 'Get flash sale products' })
-  findFlashSale(@Query('limit') limit?: string) {
-    return this.productsService.findFlashSale(limit ? parseInt(limit, 10) : undefined);
+  findFlashSale(@Query() query: ProductLimitQueryDto) {
+    return this.productsService.findFlashSale(query.limit);
   }
 
   @Public()
@@ -56,8 +56,8 @@ export class ProductsController {
   @Public()
   @Get(':id/related')
   @ApiOperation({ summary: 'Get related products (same category)' })
-  findRelated(@Param('id') id: string, @Query('limit') limit?: string) {
-    return this.productsService.findRelated(id, limit ? parseInt(limit, 10) : undefined);
+  findRelated(@Param('id') id: string, @Query() query: ProductLimitQueryDto) {
+    return this.productsService.findRelated(id, query.limit);
   }
 
   @UseGuards(JwtAuthGuard, RolesGuard)

@@ -20,6 +20,11 @@ export class PaymentsController {
     return this.paymentsService.createSnapToken(user, dto);
   }
 
+  // The MidtransNotificationDto is marked with @LooseValidation() so the global
+  // RouteAwareValidationPipe strips (instead of 400-ing on) the method-specific
+  // extra fields Midtrans sends (GoPay/QRIS/card/VA/refund_*/channel_response_*).
+  // Without this, forbidNonWhitelisted would reject the whole notification and
+  // leave the order UNPAID while Midtrans retried forever.
   @Public()
   @Post('midtrans/notification')
   @ApiOperation({ summary: 'Midtrans payment notification webhook' })

@@ -7,18 +7,39 @@ import { BroadcastNotificationDto, QueryNotificationDto } from './dto/notificati
 export class NotificationsService {
   constructor(private readonly prisma: PrismaService) {}
 
-  findAll(userId: string, query: QueryNotificationDto) {
-    return this.prisma.notification.findMany({
-      where: {
-        OR: [{ userId }, { userId: null }],
-        ...(query.unreadOnly ? { isRead: false } : {}),
-      },
-      orderBy: { createdAt: 'desc' },
-    });
+  async findAll(userId: string, query: QueryNotificationDto) {
+    const { page = 1, limit = 20 } = query;
+    const where: Prisma.NotificationWhereInput = {
+      OR: [{ userId }, { userId: null }],
+      ...(query.unreadOnly ? { isRead: false } : {}),
+    };
+
+    const [data, total] = await Promise.all([
+      this.prisma.notification.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        skip: (page - 1) * limit,
+        take: limit,
+      }),
+      this.prisma.notification.count({ where }),
+    ]);
+
+    return {
+      data,
+      meta: { total, page, limit, totalPages: Math.ceil(total / limit) },
+    };
   }
 
   async markRead(userId: string, id: string) {
     const notification = await this.findAccessible(userId, id);
+
+    // Broadcast notifications (userId === null) are shared across all users.
+    // Mutating isRead on the shared row would mark it read for everyone, so
+    // refuse to mark broadcasts read here. A per-user read-state table is the
+    // full fix but out of scope; for now we just protect the shared row.
+    if (notification.userId === null) {
+      throw new ForbiddenException('Notifikasi broadcast tidak bisa ditandai dibaca per user');
+    }
 
     return this.prisma.notification.update({
       where: { id: notification.id },

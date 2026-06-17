@@ -36,6 +36,29 @@ export class VouchersService {
     return { data, meta: { total, page, limit, totalPages: Math.ceil(total / limit) } };
   }
 
+  /**
+   * Admin-only list of ALL vouchers — active, inactive, expired, and
+   * quota-exhausted — with the same `{ data, meta }` shape as the public
+   * `findAll`. Drops the active/expiry/quota filter so admins can manage
+   * every voucher regardless of state.
+   */
+  async findAllForAdmin(query: QueryVoucherDto) {
+    const { page = 1, limit = 20 } = query;
+    const where: Prisma.VoucherWhereInput = {};
+
+    const [data, total] = await Promise.all([
+      this.prisma.voucher.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        skip: (page - 1) * limit,
+        take: limit,
+      }),
+      this.prisma.voucher.count({ where }),
+    ]);
+
+    return { data, meta: { total, page, limit, totalPages: Math.ceil(total / limit) } };
+  }
+
   async findByCode(code: string): Promise<Voucher> {
     const voucher = await this.prisma.voucher.findUnique({
       where: { code: code.toUpperCase() },

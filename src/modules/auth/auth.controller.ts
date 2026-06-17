@@ -1,5 +1,6 @@
 import { Body, Controller, Get, HttpCode, HttpStatus, Post, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
+import { Throttle } from '@nestjs/throttler';
 import { AuthenticatedUser, CurrentUser } from '../../common/decorators/current-user.decorator';
 import { Public } from '../../common/decorators/public.decorator';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
@@ -11,12 +12,18 @@ import { LoginDto } from './dto/login.dto';
 import { RefreshTokenDto } from './dto/refresh-token.dto';
 import { RegisterDto } from './dto/register.dto';
 
+// Tighter per-route throttle on credential-sensitive endpoints to limit
+// brute-force / enumeration. The global ThrottlerGuard (APP_GUARD) still
+// applies; this overrides the default 60s/100 bucket for these handlers.
+const AUTH_THROTTLE = { default: { limit: 5, ttl: 60000 } };
+
 @ApiTags('auth')
 @Controller('auth')
 export class AuthController {
   constructor(private readonly authService: AuthService) {}
 
   @Public()
+  @Throttle(AUTH_THROTTLE)
   @Post('register')
   @ApiOperation({ summary: 'Register new customer account' })
   async register(@Body() dto: RegisterDto): Promise<AuthResponseEntity> {
@@ -30,6 +37,7 @@ export class AuthController {
   }
 
   @Public()
+  @Throttle(AUTH_THROTTLE)
   @Post('login')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Login with email and password' })
@@ -61,6 +69,7 @@ export class AuthController {
   }
 
   @Public()
+  @Throttle(AUTH_THROTTLE)
   @Post('forgot-password')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Request password reset (mock — no email sent)' })

@@ -1,6 +1,15 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { Allow, IsNotEmpty, IsOptional, IsString } from 'class-validator';
+import { LooseValidation } from '../../../common/pipes/route-aware-validation.pipe';
 
+// Midtrans webhooks carry many method-specific extra fields (GoPay/QRIS/card/
+// VA/refund_*/channel_response_*/...) that vary by payment method and are not
+// listed below. @LooseValidation() tells the global RouteAwareValidationPipe
+// to strip unknown fields instead of returning 400 (forbidNonWhitelisted),
+// so the validated known fields below are still checked but extras no longer
+// reject the whole notification (which would leave orders UNPAID and cause
+// Midtrans to retry forever).
+@LooseValidation()
 export class MidtransNotificationDto {
   @ApiProperty()
   @IsString()

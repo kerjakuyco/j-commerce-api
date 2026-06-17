@@ -126,8 +126,14 @@ export class AuthService {
         WHERE id = ${stored.id} AND revokedAt IS NULL
       `;
       if (revoked === 0) {
-        // Token was already revoked: potential reuse
+        // Token was already revoked: potential reuse. Revoke the entire token
+        // family (all active refresh tokens for this user) so a stolen token
+        // that was rotated first can no longer be used, then reject.
         console.warn(`[AUTH] Refresh token reuse detected for user ${stored.userId}`);
+        await tx.refreshToken.updateMany({
+          where: { userId: stored.userId, revokedAt: null },
+          data: { revokedAt: new Date() },
+        });
         throw new UnauthorizedException('Refresh token sudah tidak berlaku');
       }
 

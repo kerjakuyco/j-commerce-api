@@ -39,35 +39,54 @@ export class PaymentsService {
     if (user.role !== UserRole.ADMIN && order.userId !== user.id) {
       throw new ForbiddenException('Anda tidak bisa membayar pesanan ini');
     }
-    if (order.status === OrderStatus.CANCELLED || order.status === OrderStatus.DELIVERED) {
-      throw new BadRequestException('Pesanan tidak bisa dibayar pada status ini');
-    }
-    if (order.status !== OrderStatus.PENDING || order.paymentStatus === PaymentStatus.PAID) {
-      throw new BadRequestException('Pesanan sudah dibayar atau sedang diproses');
-    }
 
     const now = new Date();
-    if (this.canReuseSnapToken(order, now)) {
-      return {
-        orderId: order.id,
-        orderNumber: order.orderNumber,
-        token: order.payment!.snapToken!,
-        redirectUrl: order.payment!.snapRedirectUrl!,
-        status: order.payment!.status,
-      };
-    }
+    // Serialize concurrent snap-token requests for the same order: lock the
+    // order row for the whole critical section so the second concurrent
+    // request waits, re-reads the now-persisted token, and reuses it instead
+    // of creating a second Midtrans transaction for the same order_id.
+    return this.prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT id FROM orders WHERE id = ${order.id} FOR UPDATE`;
 
-    const snap = await this.midtransService.createSnapTransaction(order);
-    const expiredAt = new Date(now.getTime() + SNAP_TOKEN_TTL_MS);
-    const payment = await this.prisma.$transaction(async (tx) => {
+      const lockedOrder = await tx.order.findUnique({
+        where: { id: order.id },
+        include: PAYMENT_ORDER_INCLUDE,
+      });
+      if (!lockedOrder) throw new NotFoundException('Pesanan tidak ditemukan');
+
+      if (
+        lockedOrder.status === OrderStatus.CANCELLED ||
+        lockedOrder.status === OrderStatus.DELIVERED
+      ) {
+        throw new BadRequestException('Pesanan tidak bisa dibayar pada status ini');
+      }
+      if (
+        lockedOrder.status !== OrderStatus.PENDING ||
+        lockedOrder.paymentStatus === PaymentStatus.PAID
+      ) {
+        throw new BadRequestException('Pesanan sudah dibayar atau sedang diproses');
+      }
+
+      if (this.canReuseSnapToken(lockedOrder, now)) {
+        return {
+          orderId: lockedOrder.id,
+          orderNumber: lockedOrder.orderNumber,
+          token: lockedOrder.payment!.snapToken!,
+          redirectUrl: lockedOrder.payment!.snapRedirectUrl!,
+          status: lockedOrder.payment!.status,
+        };
+      }
+
+      const snap = await this.midtransService.createSnapTransaction(lockedOrder);
+      const expiredAt = new Date(now.getTime() + SNAP_TOKEN_TTL_MS);
       const updatedPayment = await tx.payment.upsert({
-        where: { orderId: order.id },
+        where: { orderId: lockedOrder.id },
         create: {
-          orderId: order.id,
+          orderId: lockedOrder.id,
           method: 'MIDTRANS_SNAP',
           snapToken: snap.token,
           snapRedirectUrl: snap.redirectUrl,
-          amount: order.total,
+          amount: lockedOrder.total,
           status: PaymentStatus.UNPAID,
           expiredAt,
         },
@@ -75,29 +94,27 @@ export class PaymentsService {
           method: 'MIDTRANS_SNAP',
           snapToken: snap.token,
           snapRedirectUrl: snap.redirectUrl,
-          amount: order.total,
+          amount: lockedOrder.total,
           status: PaymentStatus.UNPAID,
           expiredAt,
         },
       });
 
-      if (order.paymentStatus !== PaymentStatus.UNPAID) {
+      if (lockedOrder.paymentStatus !== PaymentStatus.UNPAID) {
         await tx.order.update({
-          where: { id: order.id },
+          where: { id: lockedOrder.id },
           data: { paymentStatus: PaymentStatus.UNPAID },
         });
       }
 
-      return updatedPayment;
+      return {
+        orderId: lockedOrder.id,
+        orderNumber: lockedOrder.orderNumber,
+        token: snap.token,
+        redirectUrl: snap.redirectUrl,
+        status: updatedPayment.status,
+      };
     });
-
-    return {
-      orderId: order.id,
-      orderNumber: order.orderNumber,
-      token: snap.token,
-      redirectUrl: snap.redirectUrl,
-      status: payment.status,
-    };
   }
 
   async getByOrderId(user: AuthenticatedUser, orderId: string) {
@@ -149,6 +166,22 @@ export class PaymentsService {
       // Lock order row to prevent concurrent/out-of-order notification races
       await tx.$executeRaw`SELECT id FROM orders WHERE id = ${order.id} FOR UPDATE`;
 
+      // Idempotency: re-read paymentStatus under the lock. A duplicate PAID
+      // notification for an order already marked PAID would otherwise hit the
+      // guarded transition below (matches 0 rows -> P2025 -> 404 -> Midtrans
+      // retries forever). Short-circuit so Midtrans gets a 200 and stops.
+      const locked = await tx.order.findUnique({
+        where: { id: order.id },
+        select: { paymentStatus: true },
+      });
+      if (
+        locked &&
+        locked.paymentStatus === PaymentStatus.PAID &&
+        paymentStatus === PaymentStatus.PAID
+      ) {
+        return;
+      }
+
       await tx.payment.upsert({
         where: { orderId: order.id },
         create: {
@@ -170,7 +203,10 @@ export class PaymentsService {
       });
 
       if (paymentStatus === PaymentStatus.PAID) {
-        const updated = await tx.order.update({
+        // Guarded transition (updateMany) so a race that flipped paymentStatus
+        // between the read above and this write surfaces as count:0 instead of
+        // P2025; under the row lock this should always match exactly one row.
+        const updated = await tx.order.updateMany({
           where: { id: order.id, paymentStatus: { not: PaymentStatus.PAID } },
           data: {
             paymentStatus,
@@ -179,7 +215,7 @@ export class PaymentsService {
           },
         });
 
-        if (updated) {
+        if (updated.count > 0) {
           await this.incrementTotalSold(tx, order);
         }
 

@@ -2,7 +2,7 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { ForbiddenException } from '@nestjs/common';
 import { OrderStatus, Prisma, Review } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
-import { CreateReviewDto } from './dto/create-review.dto';
+import { CreateReviewDto, UpdateReviewDto } from './dto/create-review.dto';
 
 @Injectable()
 export class ReviewsService {
@@ -66,7 +66,7 @@ export class ReviewsService {
     return review;
   }
 
-  async update(id: string, userId: string, dto: Partial<CreateReviewDto>): Promise<Review> {
+  async update(id: string, userId: string, dto: UpdateReviewDto): Promise<Review> {
     const review = await this.prisma.review.findUnique({ where: { id } });
     if (!review) throw new NotFoundException('Review tidak ditemukan');
     if (review.userId !== userId) {

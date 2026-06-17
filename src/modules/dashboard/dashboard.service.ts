@@ -69,7 +69,10 @@ export class DashboardService {
     const buckets = new Map<string, { date: string; total: number; orders: number }>();
     for (let i = 0; i < days; i++) {
       const date = new Date(start);
-      date.setDate(start.getDate() + i);
+      // start is built with UTC setters (setUTCDate/setUTCHours above);
+      // keep bucketing in UTC so dateKey (toISOString, UTC) stays consistent
+      // and avoids off-by-one buckets near month boundaries on non-UTC hosts.
+      date.setUTCDate(start.getUTCDate() + i);
       const key = this.dateKey(date);
       buckets.set(key, { date: key, total: 0, orders: 0 });
     }

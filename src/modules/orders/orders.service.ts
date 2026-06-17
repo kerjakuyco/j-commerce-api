@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   Injectable,
   NotFoundException,
@@ -240,10 +241,14 @@ export class OrdersService {
       throw new BadRequestException('Pesanan hanya bisa dikonfirmasi saat status SHIPPED');
     }
 
-    return this.updateOrderAndNotify(order, {
-      status: OrderStatus.DELIVERED,
-      deliveredAt: new Date(),
-    });
+    return this.updateOrderAndNotify(
+      order,
+      OrderStatus.SHIPPED,
+      {
+        status: OrderStatus.DELIVERED,
+        deliveredAt: new Date(),
+      },
+    );
   }
 
   async updateStatus(id: string, dto: UpdateOrderStatusDto): Promise<OrderWithRelations> {
@@ -277,25 +282,40 @@ export class OrdersService {
       throw new BadRequestException('Pesanan belum dibayar');
     }
 
-    const data: Prisma.OrderUpdateInput = {
+    const data: Prisma.OrderUpdateManyMutationInput = {
       status: dto.status,
       trackingNumber: dto.trackingNumber,
       ...this.statusTimestamp(dto.status),
     };
 
-    return this.updateOrderAndNotify(order, data);
+    return this.updateOrderAndNotify(order, order.status, data);
   }
 
   private async updateOrderAndNotify(
     order: OrderWithRelations,
-    data: Prisma.OrderUpdateInput,
+    expectedStatus: OrderStatus,
+    data: Prisma.OrderUpdateManyMutationInput,
   ): Promise<OrderWithRelations> {
     return this.prisma.$transaction(async (tx) => {
-      const updated = await tx.order.update({
-        where: { id: order.id },
+      // Guarded transition: only apply the write if the order is still in the
+      // expected status. If a concurrent transition already moved the order,
+      // updateMany matches 0 rows and we surface a 409 instead of a silent
+      // last-writer-wins (e.g. a PENDING->PACKED jump over PAID).
+      const result = await tx.order.updateMany({
+        where: { id: order.id, status: expectedStatus },
         data,
+      });
+      if (result.count === 0) {
+        throw new ConflictException(
+          `Status pesanan berubah sebelum diperbarui, silakan muat ulang`,
+        );
+      }
+
+      const updated = await tx.order.findUnique({
+        where: { id: order.id },
         include: ORDER_INCLUDE,
       });
+      if (!updated) throw new NotFoundException('Pesanan tidak ditemukan');
 
       await this.createOrderNotification(
         tx,
@@ -390,7 +410,7 @@ export class OrdersService {
     });
   }
 
-  private statusTimestamp(status: OrderStatus): Prisma.OrderUpdateInput {
+  private statusTimestamp(status: OrderStatus): Prisma.OrderUpdateManyMutationInput {
     const now = new Date();
     switch (status) {
       case OrderStatus.PAID:

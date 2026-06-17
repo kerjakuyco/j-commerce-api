@@ -36,54 +36,64 @@ export class CartService {
   async add(userId: string, dto: AddToCartDto): Promise<CartEntity> {
     const quantity = dto.quantity ?? 1;
 
-    const product = await this.prisma.product.findFirst({
-      where: { id: dto.productId, deletedAt: null, isActive: true },
-      select: { id: true },
-    });
-    if (!product) {
-      throw new NotFoundException('Produk tidak ditemukan');
-    }
-
-    const variant = await this.prisma.productVariant.findFirst({
-      where: { id: dto.variantId, productId: dto.productId },
-      select: { id: true, stock: true },
-    });
-    if (!variant) {
-      throw new NotFoundException('Varian produk tidak ditemukan');
-    }
-
-    const existing = await this.prisma.cartItem.findUnique({
-      where: {
-        userId_productId_variantId: {
-          userId,
-          productId: dto.productId,
-          variantId: dto.variantId,
-        },
-      },
-      select: { id: true, quantity: true },
-    });
-
-    const nextQuantity = (existing?.quantity ?? 0) + quantity;
-    if (nextQuantity > variant.stock) {
-      throw new BadRequestException('Jumlah melebihi stok tersedia');
-    }
-
-    if (existing) {
-      await this.prisma.cartItem.update({
-        where: { id: existing.id },
-        data: { quantity: nextQuantity, selected: true },
+    // Run the read-check-write atomically under a row lock on the variant so
+    // two concurrent adds for the same variant can't both pass the stock
+    // check and then overshoot (last-writer-wins / exceeding stock). The cart
+    // item quantity is updated with an atomic increment.
+    await this.prisma.$transaction(async (tx) => {
+      const product = await tx.product.findFirst({
+        where: { id: dto.productId, deletedAt: null, isActive: true },
+        select: { id: true },
       });
-    } else {
-      await this.prisma.cartItem.create({
-        data: {
-          userId,
-          productId: dto.productId,
-          variantId: dto.variantId,
-          quantity,
-          selected: true,
-        },
+      if (!product) {
+        throw new NotFoundException('Produk tidak ditemukan');
+      }
+
+      // Lock the variant row so concurrent `add` calls for the same variant
+      // serialize here and re-read the authoritative stock value.
+      await tx.$executeRaw`SELECT id FROM product_variants WHERE id = ${dto.variantId} FOR UPDATE`;
+
+      const variant = await tx.productVariant.findFirst({
+        where: { id: dto.variantId, productId: dto.productId },
+        select: { id: true, stock: true },
       });
-    }
+      if (!variant) {
+        throw new NotFoundException('Varian produk tidak ditemukan');
+      }
+
+      const existing = await tx.cartItem.findUnique({
+        where: {
+          userId_productId_variantId: {
+            userId,
+            productId: dto.productId,
+            variantId: dto.variantId,
+          },
+        },
+        select: { id: true, quantity: true },
+      });
+
+      const nextQuantity = (existing?.quantity ?? 0) + quantity;
+      if (nextQuantity > variant.stock) {
+        throw new BadRequestException('Jumlah melebihi stok tersedia');
+      }
+
+      if (existing) {
+        await tx.cartItem.update({
+          where: { id: existing.id },
+          data: { quantity: { increment: quantity }, selected: true },
+        });
+      } else {
+        await tx.cartItem.create({
+          data: {
+            userId,
+            productId: dto.productId,
+            variantId: dto.variantId,
+            quantity,
+            selected: true,
+          },
+        });
+      }
+    });
 
     return this.get(userId);
   }

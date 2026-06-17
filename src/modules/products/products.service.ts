@@ -30,6 +30,15 @@ export class ProductsService {
     };
     if (categoryId) where.categoryId = categoryId;
     if (search) {
+      // NOTE: the Product schema declares `@@fulltext([name, brand, description])`
+      // and enables the `fullTextSearch`/`fullTextIndex` preview features, but
+      // this search intentionally stays on `contains` (LIKE). Reasons: no
+      // migration is checked into the repo so the on-disk FULLTEXT index
+      // state is uncertain, and MySQL FULLTEXT has token-size/stopword
+      // differences that would change search semantics for short queries.
+      // If the index is confirmed present and short-query behavior is
+      // acceptable, this can switch to `{ name: { search } }` etc. with a
+      // `contains` fallback for queries below the min token length.
       where.OR = [
         { name: { contains: search } },
         { brand: { contains: search } },
