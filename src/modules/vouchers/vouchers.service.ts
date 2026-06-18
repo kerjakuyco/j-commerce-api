@@ -1,4 +1,9 @@
-import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { Prisma, Voucher, VoucherType } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import {
@@ -21,17 +26,21 @@ export class VouchersService {
       expiresAt: { gte: now },
     };
 
-    const [rows, total] = await Promise.all([
-      this.prisma.voucher.findMany({
-        where,
-        orderBy: { expiresAt: 'asc' },
-        skip: (page - 1) * limit,
-        take: limit,
-      }),
-      this.prisma.voucher.count({ where }),
-    ]);
+    // Prisma can't express `usedCount < quota` (a column-to-column comparison)
+    // in `where`, so usable vouchers must be filtered in-app. To keep pagination
+    // correct, fetch the active+in-window vouchers, filter by quota, then slice
+    // in-memory — `meta.total`/`totalPages` reflect the USABLE set, and pages
+    // don't come back short. The voucher catalog is small enough that loading
+    // the active set is cheap; paging in DB then filtering post-page would
+    // yield short pages and a misleading total.
+    const rows = await this.prisma.voucher.findMany({
+      where,
+      orderBy: { expiresAt: 'asc' },
+    });
 
-    const data = rows.filter((voucher) => voucher.usedCount < voucher.quota);
+    const usable = rows.filter((voucher) => voucher.usedCount < voucher.quota);
+    const total = usable.length;
+    const data = usable.slice((page - 1) * limit, (page - 1) * limit + limit);
 
     return { data, meta: { total, page, limit, totalPages: Math.ceil(total / limit) } };
   }
@@ -84,17 +93,26 @@ export class VouchersService {
   }
 
   async update(id: string, dto: UpdateVoucherDto): Promise<Voucher> {
-    try {
-      return await this.prisma.voucher.update({
-        where: { id },
-        data: this.toPrismaData(dto) as Prisma.VoucherUpdateInput,
-      });
-    } catch (e) {
-      if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2025') {
-        throw new NotFoundException('Voucher tidak ditemukan');
+    return this.prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT id FROM vouchers WHERE id = ${id} FOR UPDATE`;
+      const voucher = await tx.voucher.findUnique({ where: { id } });
+      if (!voucher) throw new NotFoundException('Voucher tidak ditemukan');
+      if (dto.quota !== undefined && dto.quota < voucher.usedCount) {
+        throw new BadRequestException('Kuota tidak boleh lebih kecil dari jumlah terpakai');
       }
-      throw e;
-    }
+
+      try {
+        return await tx.voucher.update({
+          where: { id },
+          data: this.toPrismaData(dto) as Prisma.VoucherUpdateInput,
+        });
+      } catch (e) {
+        if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2025') {
+          throw new NotFoundException('Voucher tidak ditemukan');
+        }
+        throw e;
+      }
+    });
   }
 
   async remove(id: string): Promise<{ message: string }> {

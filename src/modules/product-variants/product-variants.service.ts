@@ -1,4 +1,9 @@
-import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreateVariantDto, UpdateVariantDto } from './dto/variant.dto';
@@ -26,6 +31,10 @@ export class ProductVariantsService {
   }
 
   async update(id: string, dto: UpdateVariantDto) {
+    if (dto.stock !== undefined && dto.expectedStock === undefined) {
+      throw new BadRequestException('expectedStock wajib dikirim saat mengubah stok');
+    }
+
     const data: Prisma.ProductVariantUpdateInput = {
       name: dto.name,
       sku: dto.sku,
@@ -33,14 +42,18 @@ export class ProductVariantsService {
     };
     if (dto.price !== undefined) data.price = new Prisma.Decimal(dto.price);
 
-    try {
-      return await this.prisma.productVariant.update({ where: { id }, data });
-    } catch (e) {
-      if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2025') {
-        throw new NotFoundException('Varian produk tidak ditemukan');
+    return this.prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT id FROM product_variants WHERE id = ${id} FOR UPDATE`;
+      const variant = await tx.productVariant.findUnique({ where: { id } });
+      if (!variant) throw new NotFoundException('Varian produk tidak ditemukan');
+      if (dto.stock !== undefined && variant.stock !== dto.expectedStock) {
+        throw new ConflictException(
+          'Stok berubah sejak formulir dibuka, silakan muat ulang sebelum menyimpan',
+        );
       }
-      throw e;
-    }
+
+      return tx.productVariant.update({ where: { id }, data });
+    });
   }
 
   async remove(id: string): Promise<{ message: string }> {

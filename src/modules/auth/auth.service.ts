@@ -14,6 +14,7 @@ import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
 import { JwtPayload } from './strategies/jwt.strategy';
 import { UserResponseEntity } from './entities/auth-response.entity';
+import { v4 as uuidv4 } from 'uuid';
 
 export interface AuthTokens {
   accessToken: string;
@@ -24,6 +25,21 @@ export interface AuthTokens {
 interface RefreshJwtPayload {
   sub: string;
   type: string;
+}
+
+/**
+ * Sentinel thrown inside the rotation transaction when the refresh token was
+ * already revoked by a concurrent rotation (potential reuse). It must NOT be
+ * a Nest exception — we want the transaction to roll back (so no new token is
+ * issued) and then handle the family revocation in a separate committed write
+ * in the catch block. Throwing an UnauthorizedException directly would both
+ * roll back AND lose the chance to revoke the family outside the tx.
+ */
+class RefreshTokenReuseError extends Error {
+  constructor(readonly userId: string) {
+    super('Refresh token reuse detected');
+    this.name = 'RefreshTokenReuseError';
+  }
 }
 
 @Injectable()
@@ -118,27 +134,42 @@ export class AuthService {
       throw new UnauthorizedException('User tidak aktif');
     }
 
-    // Rotate atomically: revoke old and issue new inside a transaction
-    return this.prisma.$transaction(async (tx) => {
-      const revoked = await tx.$executeRaw`
-        UPDATE refresh_tokens
-        SET revokedAt = NOW()
-        WHERE id = ${stored.id} AND revokedAt IS NULL
-      `;
-      if (revoked === 0) {
-        // Token was already revoked: potential reuse. Revoke the entire token
-        // family (all active refresh tokens for this user) so a stolen token
-        // that was rotated first can no longer be used, then reject.
-        console.warn(`[AUTH] Refresh token reuse detected for user ${stored.userId}`);
-        await tx.refreshToken.updateMany({
-          where: { userId: stored.userId, revokedAt: null },
-          data: { revokedAt: new Date() },
-        });
-        throw new UnauthorizedException('Refresh token sudah tidak berlaku');
-      }
-
-      return this.generateTokensInTx(tx, user.id, user.email, user.role);
-    });
+    // Rotate atomically: revoke old and issue new inside a transaction. The
+    // reuse-detection family revocation is performed AFTER this transaction
+    // (in its own committed write) — doing it inside the tx and then throwing
+    // would roll the revocation back, making containment a silent no-op.
+    try {
+      return await this.prisma.$transaction(async (tx) => {
+        // The row-level lock on this UPDATE serializes concurrent rotations
+        // of the same token: the first request sets revokedAt (count 1) and
+        // issues a new token; a concurrent one sees revokedAt no longer NULL
+        // (count 0) and drops to the reuse path below.
+        const revoked = await tx.$executeRaw`
+          UPDATE refresh_tokens
+          SET revokedAt = NOW()
+          WHERE id = ${stored.id} AND revokedAt IS NULL
+        `;
+        if (revoked === 0) {
+          // Token was already revoked by a concurrent rotation: potential reuse.
+          // Bail out so the tx rolls back and no new token is issued; the catch
+          // below revokes the entire active family in a committed write.
+          throw new RefreshTokenReuseError(stored.userId);
+        }
+        return this.generateTokensInTx(tx, user.id, user.email, user.role);
+      });
+    } catch (err) {
+      if (!(err instanceof RefreshTokenReuseError)) throw err;
+      // Revoke the entire active refresh-token family for this user so a stolen
+      // token that was rotated first can no longer be used. This MUST be a
+      // separate committed write — inside the rolled-back rotation tx the
+      // revocation would be undone, defeating reuse detection entirely.
+      console.warn(`[AUTH] Refresh token reuse detected for user ${err.userId}`);
+      await this.prisma.refreshToken.updateMany({
+        where: { userId: err.userId, revokedAt: null },
+        data: { revokedAt: new Date() },
+      });
+      throw new UnauthorizedException('Refresh token sudah tidak berlaku');
+    }
   }
 
   // ============================================
@@ -177,14 +208,19 @@ export class AuthService {
       throw new UnauthorizedException('Password lama salah');
     }
     const hashedNew = await bcrypt.hash(dto.newPassword, 12);
-    await this.prisma.user.update({
-      where: { id: userId },
-      data: { password: hashedNew },
-    });
-    // Revoke all refresh tokens (force re-login on other devices)
-    await this.prisma.refreshToken.updateMany({
-      where: { userId, revokedAt: null },
-      data: { revokedAt: new Date() },
+    // Atomic: update password AND revoke all refresh tokens together so a
+    // failure between the two writes can't leave stale tokens valid against a
+    // just-changed password (forces re-login on every device, no half-state).
+    await this.prisma.$transaction(async (tx) => {
+      await tx.user.update({
+        where: { id: userId },
+        data: { password: hashedNew },
+      });
+      // Revoke all refresh tokens (force re-login on other devices)
+      await tx.refreshToken.updateMany({
+        where: { userId, revokedAt: null },
+        data: { revokedAt: new Date() },
+      });
     });
   }
 
@@ -221,7 +257,7 @@ export class AuthService {
       expiresIn: accessExpires,
     });
     const refreshToken = await this.jwtService.signAsync(
-      { sub: userId, type: 'refresh' },
+      { sub: userId, type: 'refresh', jti: uuidv4() },
       {
         secret: this.configService.get<string>('jwt.refreshSecret'),
         expiresIn: refreshExpires,

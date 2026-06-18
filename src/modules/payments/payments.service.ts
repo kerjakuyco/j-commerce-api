@@ -166,20 +166,27 @@ export class PaymentsService {
       // Lock order row to prevent concurrent/out-of-order notification races
       await tx.$executeRaw`SELECT id FROM orders WHERE id = ${order.id} FOR UPDATE`;
 
-      // Idempotency: re-read paymentStatus under the lock. A duplicate PAID
-      // notification for an order already marked PAID would otherwise hit the
-      // guarded transition below (matches 0 rows -> P2025 -> 404 -> Midtrans
-      // retries forever). Short-circuit so Midtrans gets a 200 and stops.
+      // Idempotency + out-of-order protection, evaluated under the row lock.
+      // Re-read paymentStatus here (not the stale `order` read above the tx)
+      // so the decision reflects any concurrent webhook that committed first.
       const locked = await tx.order.findUnique({
         where: { id: order.id },
-        select: { paymentStatus: true },
+        select: { status: true, paymentStatus: true },
       });
-      if (
-        locked &&
-        locked.paymentStatus === PaymentStatus.PAID &&
-        paymentStatus === PaymentStatus.PAID
-      ) {
+      if (!locked) throw new NotFoundException('Pesanan tidak ditemukan');
+      if (locked.status === OrderStatus.CANCELLED) {
         return;
+      }
+      if (locked.paymentStatus === PaymentStatus.PAID) {
+        // Order already paid. Accept ONLY a REFUNDED notification (to mark a
+        // refund). Ignore a duplicate PAID (stops Midtrans retries) AND any
+        // late downgrade (EXPIRED/FAILED) so a PAID order can't be left with an
+        // EXPIRED payment and dangling consumed stock/totalSold/voucher — the
+        // PAID transition already decremented stock and bumped totalSold, and
+        // those must not be stranded by a stale out-of-order notification.
+        if (paymentStatus !== PaymentStatus.REFUNDED) {
+          return;
+        }
       }
 
       await tx.payment.upsert({
@@ -207,11 +214,15 @@ export class PaymentsService {
         // between the read above and this write surfaces as count:0 instead of
         // P2025; under the row lock this should always match exactly one row.
         const updated = await tx.order.updateMany({
-          where: { id: order.id, paymentStatus: { not: PaymentStatus.PAID } },
+          where: {
+            id: order.id,
+            status: { not: OrderStatus.CANCELLED },
+            paymentStatus: { not: PaymentStatus.PAID },
+          },
           data: {
             paymentStatus,
             paidAt,
-            ...(order.status === OrderStatus.PENDING ? { status: OrderStatus.PAID } : {}),
+            ...(locked.status === OrderStatus.PENDING ? { status: OrderStatus.PAID } : {}),
           },
         });
 
@@ -233,10 +244,14 @@ export class PaymentsService {
 
       if (
         (paymentStatus === PaymentStatus.EXPIRED || paymentStatus === PaymentStatus.FAILED) &&
-        order.status === OrderStatus.PENDING
+        locked.status === OrderStatus.PENDING
       ) {
         const cancelled = await tx.order.updateMany({
-          where: { id: order.id, status: OrderStatus.PENDING },
+          where: {
+            id: order.id,
+            status: OrderStatus.PENDING,
+            paymentStatus: { not: PaymentStatus.PAID },
+          },
           data: { status: OrderStatus.CANCELLED, paymentStatus, cancelledAt: new Date() },
         });
         if (cancelled.count > 0) {
@@ -255,8 +270,8 @@ export class PaymentsService {
         return;
       }
 
-      await tx.order.update({
-        where: { id: order.id },
+      await tx.order.updateMany({
+        where: { id: order.id, status: { not: OrderStatus.CANCELLED } },
         data: { paymentStatus },
       });
     });

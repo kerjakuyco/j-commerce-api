@@ -1,6 +1,6 @@
 import { ApiProperty, PartialType } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
-import { IsInt, IsNotEmpty, IsString, Max, Min } from 'class-validator';
+import { IsInt, IsNotEmpty, IsOptional, IsString, Max, Min } from 'class-validator';
 
 export class CreateVariantDto {
   @ApiProperty()
@@ -27,4 +27,11 @@ export class CreateVariantDto {
   stock!: number;
 }
 
-export class UpdateVariantDto extends PartialType(CreateVariantDto) {}
+export class UpdateVariantDto extends PartialType(CreateVariantDto) {
+  @ApiProperty({ required: false, description: 'Current stock seen by the admin form' })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  expectedStock?: number;
+}

@@ -1,5 +1,5 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-import { Address } from '@prisma/client';
+import { Address, Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreateAddressDto, UpdateAddressDto } from './dto/address.dto';
 import { REGIONS } from './regions.data';
@@ -20,10 +20,11 @@ export class AddressesService {
   }
 
   async create(userId: string, dto: CreateAddressDto): Promise<Address> {
-    const totalAddresses = await this.prisma.address.count({ where: { userId } });
-    const makeDefault = dto.isDefault === true || totalAddresses === 0;
-
     return this.prisma.$transaction(async (tx) => {
+      await this.lockUserAddressSet(tx, userId);
+      const totalAddresses = await tx.address.count({ where: { userId } });
+      const makeDefault = dto.isDefault === true || totalAddresses === 0;
+
       if (makeDefault) {
         await tx.address.updateMany({
           where: { userId, isDefault: true },
@@ -52,6 +53,7 @@ export class AddressesService {
     }
 
     return this.prisma.$transaction(async (tx) => {
+      await this.lockUserAddressSet(tx, userId);
       if (isDefault === true) {
         await tx.address.updateMany({
           where: { userId, isDefault: true },
@@ -73,6 +75,7 @@ export class AddressesService {
     const address = await this.findOwnedAddress(userId, id);
 
     await this.prisma.$transaction(async (tx) => {
+      await this.lockUserAddressSet(tx, userId);
       await tx.address.delete({ where: { id } });
 
       if (address.isDefault) {
@@ -97,6 +100,7 @@ export class AddressesService {
     await this.findOwnedAddress(userId, id);
 
     return this.prisma.$transaction(async (tx) => {
+      await this.lockUserAddressSet(tx, userId);
       await tx.address.updateMany({
         where: { userId, isDefault: true },
         data: { isDefault: false },
@@ -118,5 +122,9 @@ export class AddressesService {
     }
 
     return address;
+  }
+
+  private async lockUserAddressSet(tx: Prisma.TransactionClient, userId: string): Promise<void> {
+    await tx.$executeRaw`SELECT id FROM users WHERE id = ${userId} FOR UPDATE`;
   }
 }

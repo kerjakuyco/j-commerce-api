@@ -1,5 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
-import { ForbiddenException } from '@nestjs/common';
+import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { OrderStatus, Prisma, Review } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreateReviewDto, UpdateReviewDto } from './dto/create-review.dto';
@@ -41,29 +40,45 @@ export class ReviewsService {
       throw new ForbiddenException('Anda hanya bisa review produk yang sudah diterima');
     }
 
-    // Check duplicate
-    const existing = await this.prisma.review.findUnique({
-      where: { productId_userId: { productId, userId } },
+    return this.prisma.$transaction(async (tx) => {
+      // Duplicate check + create + rating recalculation must be atomic, with
+      // the product row locked, so two concurrent reviews on the same product
+      // can't both pass the duplicate check (P2002 -> 500) or race on the
+      // aggregate -> product update (lost update undercounting totalReview).
+      await tx.$executeRaw`SELECT id FROM products WHERE id = ${productId} FOR UPDATE`;
+
+      const existing = await tx.review.findUnique({
+        where: { productId_userId: { productId, userId } },
+      });
+      if (existing) {
+        throw new ForbiddenException('Anda sudah mereview produk ini');
+      }
+
+      let review: Review;
+      try {
+        review = await tx.review.create({
+          data: {
+            productId,
+            userId,
+            rating: dto.rating,
+            comment: dto.comment,
+            images: dto.imageUrls ?? Prisma.JsonNull,
+            isVerified: true,
+          },
+        });
+      } catch (e) {
+        // Backstop for the duplicate-check TOCTOU: two concurrent creates for
+        // the same (product, user) both pass findUnique, the unique constraint
+        // rejects the second — surface a clean 403 instead of a 500.
+        if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') {
+          throw new ForbiddenException('Anda sudah mereview produk ini');
+        }
+        throw e;
+      }
+
+      await this._recalculateProductRating(tx, productId);
+      return review;
     });
-    if (existing) {
-      throw new ForbiddenException('Anda sudah mereview produk ini');
-    }
-
-    const review = await this.prisma.review.create({
-      data: {
-        productId,
-        userId,
-        rating: dto.rating,
-        comment: dto.comment,
-        images: dto.imageUrls ?? Prisma.JsonNull,
-        isVerified: true,
-      },
-    });
-
-    // Update product rating avg + count
-    await this._recalculateProductRating(productId);
-
-    return review;
   }
 
   async update(id: string, userId: string, dto: UpdateReviewDto): Promise<Review> {
@@ -72,16 +87,22 @@ export class ReviewsService {
     if (review.userId !== userId) {
       throw new ForbiddenException('Anda hanya bisa edit review sendiri');
     }
-    const updated = await this.prisma.review.update({
-      where: { id },
-      data: {
-        rating: dto.rating,
-        comment: dto.comment,
-        images: dto.imageUrls ?? undefined,
-      },
+
+    return this.prisma.$transaction(async (tx) => {
+      // Lock the product row so concurrent review mutations on the same
+      // product serialize and the aggregate -> product update isn't lost.
+      await tx.$executeRaw`SELECT id FROM products WHERE id = ${review.productId} FOR UPDATE`;
+      const updated = await tx.review.update({
+        where: { id },
+        data: {
+          rating: dto.rating,
+          comment: dto.comment,
+          images: dto.imageUrls ?? undefined,
+        },
+      });
+      await this._recalculateProductRating(tx, review.productId);
+      return updated;
     });
-    await this._recalculateProductRating(review.productId);
-    return updated;
   }
 
   async remove(id: string, userId: string, isAdmin: boolean): Promise<void> {
@@ -90,17 +111,24 @@ export class ReviewsService {
     if (review.userId !== userId && !isAdmin) {
       throw new ForbiddenException('Anda hanya bisa hapus review sendiri');
     }
-    await this.prisma.review.delete({ where: { id } });
-    await this._recalculateProductRating(review.productId);
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT id FROM products WHERE id = ${review.productId} FOR UPDATE`;
+      await tx.review.delete({ where: { id } });
+      await this._recalculateProductRating(tx, review.productId);
+    });
   }
 
-  private async _recalculateProductRating(productId: string): Promise<void> {
-    const agg = await this.prisma.review.aggregate({
+  private async _recalculateProductRating(
+    tx: Prisma.TransactionClient,
+    productId: string,
+  ): Promise<void> {
+    const agg = await tx.review.aggregate({
       where: { productId },
       _avg: { rating: true },
       _count: true,
     });
-    await this.prisma.product.update({
+    await tx.product.update({
       where: { id: productId },
       data: {
         rating: agg._avg.rating ?? 0,

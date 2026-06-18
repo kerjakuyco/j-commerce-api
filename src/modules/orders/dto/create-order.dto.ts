@@ -35,6 +35,12 @@ export class CreateOrderItemDto {
 }
 
 export class CreateOrderDto {
+  @ApiProperty({ required: false })
+  @IsOptional()
+  @IsString()
+  @MaxLength(191)
+  clientRequestId?: string;
+
   @ApiProperty()
   @IsString()
   @IsNotEmpty()

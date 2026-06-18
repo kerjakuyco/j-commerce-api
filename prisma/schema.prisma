@@ -274,6 +274,7 @@ model WishlistItem {
 model Order {
   id              String      @id @default(cuid())
   orderNumber     String      @unique
+  clientRequestId String?     @unique @db.VarChar(191)
   userId          String
   addressId       String
   shippingMethod  ShippingMethod @default(REGULAR)
@@ -323,6 +324,10 @@ model OrderItem {
   variant ProductVariant @relation(fields: [variantId], references: [id])
 
   @@index([orderId])
+  // Supports dashboard.getTopProducts `groupBy(productId)` and the review
+  // eligibility `orderItem.findFirst({ where: { productId } })` — both would
+  // full-scan order_items without this.
+  @@index([productId])
   @@map("order_items")
 }
 
