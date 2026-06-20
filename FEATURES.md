@@ -50,7 +50,8 @@ src/
 │   ├── product-images/        # Image gallery
 │   ├── reviews/               # Product reviews
 │   ├── addresses/             # User addresses
-│   ├── cart/                  # Server-side cart (optional, mobile uses local)
+│   ├── cart/                  # Server-side cart with mobile local fallback
+│   ├── wishlist/              # User wishlist sync
 │   ├── orders/                # Order CRUD + status flow
 │   ├── payments/              # Midtrans Snap integration
 │   ├── notifications/         # In-app notifications
@@ -68,7 +69,7 @@ src/
 
 ### 3.1 Auth
 - [x] **Register** dengan email + password + name + phone (default role: CUSTOMER)
-- [x] **Login** dengan email + password → return `accessToken` (15 min) + `refreshToken` (7 days)
+- [x] **Login** dengan email + password → return `{ user, accessToken, refreshToken, expiresIn }`
 - [x] **Refresh token** endpoint — exchange refresh token for new access token
 - [x] **Get current user** (`/auth/me`) — protected, returns user profile
 - [x] **Forgot password** (`/auth/forgot-password`) — accept email, return success (no real email gateway in portfolio scope)
@@ -140,13 +141,13 @@ src/
 - [x] **Update qty** (`PATCH /cart/items/:id`) — protected
 - [x] **Remove item** (`DELETE /cart/items/:id`) — protected
 - [x] **Clear cart** (`DELETE /cart`) — protected
-- [~] **Catatan:** Mobile app uses local SharedPreferences cart, so this endpoint is exposed for future use / admin dashboard
+- [~] **Catatan:** Mobile app attempts remote cart sync first, with SharedPreferences fallback for demo/offline mode.
 
 ### 3.10 Wishlist
 - [x] **Get wishlist** (`GET /wishlist`) — protected
 - [x] **Add to wishlist** (`POST /wishlist/:productId`) — protected
 - [x] **Remove from wishlist** (`DELETE /wishlist/:productId`) — protected
-- [~] **Catatan:** Mobile uses mock wishlist for now; endpoint ready when mobile migrates
+- [~] **Catatan:** Mobile app attempts remote wishlist sync first, with local ID fallback for demo/offline mode.
 
 ### 3.11 Orders
 - [x] **Create order** (`POST /orders`) — protected, calculates subtotal, validates stock atomically
@@ -169,6 +170,7 @@ src/
 
 ### 3.13 Vouchers
 - [x] **List active vouchers** (`GET /vouchers?page=&limit=`) — public
+- [x] **List all vouchers for admin** (`GET /vouchers/admin/all?page=&limit=`) — admin only
 - [x] **Get voucher by code** (`GET /vouchers/:code`) — public
 - [x] **Create voucher** (`POST /vouchers`) — admin only
 - [x] **Update voucher** (`PATCH /vouchers/:id`) — admin only
@@ -188,6 +190,7 @@ src/
 
 ### 3.15 Banners
 - [x] **List active banners** (`GET /banners`) — public
+- [x] **List all banners for admin** (`GET /banners/admin/all`) — admin only
 - [x] **Get banner by id** (`GET /banners/:id`) — public
 - [x] **Create banner** (`POST /banners`) — admin only
 - [x] **Update banner** (`PATCH /banners/:id`) — admin only

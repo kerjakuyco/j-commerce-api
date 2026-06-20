@@ -318,7 +318,7 @@ function verifySignature(notification: any): boolean {
 - **SQL injection:** Prevented by Prisma parameterized queries
 - **XSS:** None risk since we only output JSON (no HTML rendering server-side)
 - **CSRF:** Not applicable (no cookies, all auth via `Authorization: Bearer`)
-- **Rate limiting:** 100 req/min per IP (configurable), stricter on auth endpoints (10/min)
+- **Rate limiting:** 100 req/min per IP (configurable), stricter on auth endpoints (5/min)
 - **CORS:** Whitelist specific origins (mobile app config, admin domain)
 - **Helmet:** Sets `X-Content-Type-Options`, `X-Frame-Options`, etc.
 - **Input validation:** All DTOs validated with `class-validator` (whitelist strips unknown fields)
