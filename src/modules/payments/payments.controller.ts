@@ -3,6 +3,7 @@ import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { AuthenticatedUser, CurrentUser } from '../../common/decorators/current-user.decorator';
 import { Public } from '../../common/decorators/public.decorator';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
+import { CompleteMockPaymentDto } from './dto/complete-mock-payment.dto';
 import { CreateSnapTokenDto } from './dto/create-snap-token.dto';
 import { MidtransNotificationDto } from './dto/midtrans-notification.dto';
 import { PaymentsService } from './payments.service';
@@ -18,6 +19,14 @@ export class PaymentsController {
   @ApiOperation({ summary: 'Create Midtrans Snap token for order' })
   createSnapToken(@CurrentUser() user: AuthenticatedUser, @Body() dto: CreateSnapTokenDto) {
     return this.paymentsService.createSnapToken(user, dto);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth('access-token')
+  @Post('midtrans/mock-complete')
+  @ApiOperation({ summary: 'Complete mock Midtrans payment in local/dev mode' })
+  completeMockPayment(@CurrentUser() user: AuthenticatedUser, @Body() dto: CompleteMockPaymentDto) {
+    return this.paymentsService.completeMockPayment(user, dto);
   }
 
   // The MidtransNotificationDto is marked with @LooseValidation() so the global

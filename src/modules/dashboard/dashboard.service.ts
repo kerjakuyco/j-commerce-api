@@ -16,9 +16,7 @@ export class DashboardService {
   async getOverview() {
     const now = new Date();
     const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
-    const previousMonthStart = new Date(
-      Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 1),
-    );
+    const previousMonthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 1));
 
     const [revenue, ordersThisMonth, ordersPreviousMonth, customers, products, recentOrders] =
       await Promise.all([

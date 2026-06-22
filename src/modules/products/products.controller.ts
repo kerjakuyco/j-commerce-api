@@ -17,7 +17,12 @@ import { Public } from '../../common/decorators/public.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
-import { CreateProductDto, ProductLimitQueryDto, QueryProductDto, UpdateProductDto } from './dto/product.dto';
+import {
+  CreateProductDto,
+  ProductLimitQueryDto,
+  QueryProductDto,
+  UpdateProductDto,
+} from './dto/product.dto';
 import { ProductsService } from './products.service';
 
 @ApiTags('products')

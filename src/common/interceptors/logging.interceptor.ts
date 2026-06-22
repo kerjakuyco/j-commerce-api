@@ -28,7 +28,7 @@ export class LoggingInterceptor implements NestInterceptor {
         },
         error: (err: Error) => {
           const ms = Date.now() - start;
-          const status = err instanceof HttpException ? err.getStatus() : (res.statusCode || 500);
+          const status = err instanceof HttpException ? err.getStatus() : res.statusCode || 500;
           this.logger.error(`${method} ${originalUrl} ${status} ${ms}ms — ${err.message}`);
         },
       }),

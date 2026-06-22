@@ -16,6 +16,11 @@ export class MidtransService {
 
   constructor(private readonly configService: ConfigService) {}
 
+  isMockMode(): boolean {
+    const serverKey = this.configService.get<string>('midtrans.serverKey', '');
+    return !serverKey || serverKey.includes('XXXXXXXX');
+  }
+
   async createSnapTransaction(
     order: OrderForSnap,
   ): Promise<{ token: string; redirectUrl: string }> {
@@ -23,7 +28,7 @@ export class MidtransService {
     const clientKey = this.configService.get<string>('midtrans.clientKey', '');
     const isProduction = this.configService.get<boolean>('midtrans.isProduction', false);
 
-    if (!serverKey || serverKey.includes('XXXXXXXX')) {
+    if (this.isMockMode()) {
       const token = `mock-snap-${order.orderNumber}`;
       return {
         token,
@@ -66,6 +71,9 @@ export class MidtransService {
             ]
           : []),
       ],
+      callbacks: {
+        finish: 'jcommerce://midtrans',
+      },
     };
 
     this.logger.log(`Creating Midtrans Snap transaction for ${order.orderNumber}`);

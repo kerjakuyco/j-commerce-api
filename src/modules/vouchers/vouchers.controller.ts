@@ -41,7 +41,9 @@ export class VouchersController {
   @ApiBearerAuth('access-token')
   @Roles(UserRole.ADMIN)
   @Get('admin/all')
-  @ApiOperation({ summary: 'List ALL vouchers (admin only — active, inactive, expired, exhausted)' })
+  @ApiOperation({
+    summary: 'List ALL vouchers (admin only — active, inactive, expired, exhausted)',
+  })
   findAllForAdmin(@Query() query: QueryVoucherDto) {
     return this.vouchersService.findAllForAdmin(query);
   }

@@ -25,7 +25,9 @@ describe('RouteAwareValidationPipe', () => {
   const pipe = new RouteAwareValidationPipe();
 
   it('rejects unknown fields on a strict DTO (forbidNonWhitelisted)', async () => {
-    await expect(pipe.transform({ order_id: 'o1', gopay_qris: 'x' }, meta(StrictDto))).rejects.toBeDefined();
+    await expect(
+      pipe.transform({ order_id: 'o1', gopay_qris: 'x' }, meta(StrictDto)),
+    ).rejects.toBeDefined();
   });
 
   it('strips unknown fields on a @LooseValidation DTO instead of 400-ing', async () => {

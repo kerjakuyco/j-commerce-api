@@ -199,9 +199,7 @@ export class ProductsService {
           ...data,
           basePrice: new Prisma.Decimal(data.basePrice),
           discountPrice:
-            data.discountPrice !== undefined
-              ? new Prisma.Decimal(data.discountPrice)
-              : null,
+            data.discountPrice !== undefined ? new Prisma.Decimal(data.discountPrice) : null,
           flashSaleEndsAt: data.flashSaleEndsAt ? new Date(data.flashSaleEndsAt) : null,
           variants: variants
             ? {

@@ -7,6 +7,7 @@ import {
 import { NotificationType, OrderStatus, PaymentStatus, Prisma, UserRole } from '@prisma/client';
 import { AuthenticatedUser } from '../../common/decorators/current-user.decorator';
 import { PrismaService } from '../../prisma/prisma.service';
+import { CompleteMockPaymentDto } from './dto/complete-mock-payment.dto';
 import { CreateSnapTokenDto } from './dto/create-snap-token.dto';
 import { MidtransNotificationDto } from './dto/midtrans-notification.dto';
 import { SnapTokenEntity } from './entities/payment.entity';
@@ -131,11 +132,58 @@ export class PaymentsService {
     return order.payment;
   }
 
+  async completeMockPayment(
+    user: AuthenticatedUser,
+    dto: CompleteMockPaymentDto,
+  ): Promise<{ message: string }> {
+    if (!this.midtransService.isMockMode()) {
+      throw new BadRequestException('Mock payment is disabled');
+    }
+
+    const order = await this.prisma.order.findFirst({
+      where: { OR: [{ id: dto.orderId }, { orderNumber: dto.orderId }] },
+      include: PAYMENT_ORDER_INCLUDE,
+    });
+    if (!order) throw new NotFoundException('Pesanan tidak ditemukan');
+    if (user.role !== UserRole.ADMIN && order.userId !== user.id) {
+      throw new ForbiddenException('Anda tidak bisa membayar pesanan ini');
+    }
+
+    const transactionStatus =
+      dto.result === 'success' ? 'settlement' : dto.result === 'pending' ? 'pending' : 'failure';
+    return this.processNotification(
+      {
+        order_id: order.orderNumber,
+        status_code: dto.result === 'success' ? '200' : '202',
+        gross_amount: new Prisma.Decimal(order.total).toFixed(2),
+        signature_key: 'mock-signature',
+        transaction_status: transactionStatus,
+        transaction_id: `mock-${order.orderNumber}-${Date.now()}`,
+        fraud_status: 'accept',
+      },
+      false,
+    );
+  }
+
   async handleNotification(dto: MidtransNotificationDto): Promise<{ message: string }> {
+    return this.processNotification(dto, true);
+  }
+
+  private async processNotification(
+    dto: MidtransNotificationDto,
+    verifySignature: boolean,
+  ): Promise<{ message: string }> {
     if (!this.midtransService.verifySignature(dto)) {
+      if (!verifySignature) return this.processTrustedNotification(dto);
       throw new BadRequestException('Signature Midtrans tidak valid');
     }
 
+    return this.processTrustedNotification(dto);
+  }
+
+  private async processTrustedNotification(
+    dto: MidtransNotificationDto,
+  ): Promise<{ message: string }> {
     const order = await this.prisma.order.findUnique({
       where: { orderNumber: dto.order_id },
       include: PAYMENT_ORDER_INCLUDE,
