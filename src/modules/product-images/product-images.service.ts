@@ -14,7 +14,12 @@ export class ProductImagesService {
     });
     if (!product) throw new NotFoundException('Produk tidak ditemukan');
 
-    return this.prisma.productImage.create({ data: { productId, ...dto } });
+    const sortOrder =
+      dto.sortOrder ?? (await this.prisma.productImage.count({ where: { productId } }));
+
+    return this.prisma.productImage.create({
+      data: { productId, url: dto.url, sortOrder },
+    });
   }
 
   async reorder(productId: string, dto: ReorderImagesDto) {

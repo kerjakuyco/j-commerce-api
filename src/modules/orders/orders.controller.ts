@@ -5,6 +5,7 @@ import { AuthenticatedUser, CurrentUser } from '../../common/decorators/current-
 import { Roles } from '../../common/decorators/roles.decorator';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
+import { CancelOrderDto } from './dto/cancel-order.dto';
 import { CreateOrderDto } from './dto/create-order.dto';
 import { QueryOrderDto } from './dto/query-order.dto';
 import { UpdateOrderStatusDto } from './dto/update-order-status.dto';
@@ -37,8 +38,12 @@ export class OrdersController {
 
   @Patch(':id/cancel')
   @ApiOperation({ summary: 'Cancel order' })
-  cancel(@Param('id') id: string, @CurrentUser() user: AuthenticatedUser) {
-    return this.ordersService.cancel(id, user);
+  cancel(
+    @Param('id') id: string,
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: CancelOrderDto,
+  ) {
+    return this.ordersService.cancel(id, user, dto);
   }
 
   @Patch(':id/confirm-received')

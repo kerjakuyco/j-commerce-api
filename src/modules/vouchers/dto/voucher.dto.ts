@@ -55,7 +55,7 @@ export class CreateVoucherDto {
   @Type(() => Number)
   @IsNumber({ maxDecimalPlaces: 2 })
   @Min(0)
-  maxDiscount?: number;
+  maxDiscount?: number | null;
 
   @ApiProperty({ example: 100 })
   @Type(() => Number)

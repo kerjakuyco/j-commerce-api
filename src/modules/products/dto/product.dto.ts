@@ -1,5 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { Type } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 import {
   IsArray,
   IsBoolean,
@@ -129,7 +129,7 @@ export class UpdateProductDto {
   @Type(() => Number)
   @IsNumber({ maxDecimalPlaces: 2 })
   @Min(0)
-  discountPrice?: number;
+  discountPrice?: number | null;
 
   @ApiProperty({ required: false })
   @IsOptional()
@@ -208,6 +208,30 @@ export class QueryProductDto {
   @IsOptional()
   @IsString()
   sort?: 'newest' | 'price_asc' | 'price_desc' | 'rating' | 'sold';
+
+  @ApiProperty({ required: false, description: 'Only products with stock available' })
+  @IsOptional()
+  @Transform(({ value }) => value === true || value === 'true')
+  @IsBoolean()
+  inStock?: boolean;
+
+  @ApiProperty({ required: false, description: 'Only discounted products' })
+  @IsOptional()
+  @Transform(({ value }) => value === true || value === 'true')
+  @IsBoolean()
+  hasDiscount?: boolean;
+
+  @ApiProperty({ required: false, description: 'Only featured products' })
+  @IsOptional()
+  @Transform(({ value }) => value === true || value === 'true')
+  @IsBoolean()
+  featured?: boolean;
+
+  @ApiProperty({ required: false, description: 'Only active flash-sale products' })
+  @IsOptional()
+  @Transform(({ value }) => value === true || value === 'true')
+  @IsBoolean()
+  flash?: boolean;
 }
 
 /**

@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { OrderStatus, UserRole } from '@prisma/client';
+import { OrderStatus, PaymentStatus, UserRole } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 
 const REVENUE_STATUSES = [
@@ -18,32 +18,50 @@ export class DashboardService {
     const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
     const previousMonthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 1));
 
-    const [revenue, ordersThisMonth, ordersPreviousMonth, customers, products, recentOrders] =
-      await Promise.all([
-        this.prisma.order.aggregate({
-          where: { status: { in: REVENUE_STATUSES }, createdAt: { gte: monthStart } },
-          _sum: { total: true },
-        }),
-        this.prisma.order.count({ where: { createdAt: { gte: monthStart } } }),
-        this.prisma.order.count({
-          where: { createdAt: { gte: previousMonthStart, lt: monthStart } },
-        }),
-        this.prisma.user.count({
-          where: { role: UserRole.CUSTOMER, deletedAt: null },
-        }),
-        this.prisma.product.count({ where: { deletedAt: null, isActive: true } }),
-        this.prisma.order.findMany({
-          orderBy: { createdAt: 'desc' },
-          take: 5,
-          include: {
-            user: { select: { id: true, name: true, email: true } },
-            _count: { select: { items: true } },
-          },
-        }),
-      ]);
+    const [
+      revenue,
+      previousRevenue,
+      ordersThisMonth,
+      ordersPreviousMonth,
+      customers,
+      products,
+      recentOrders,
+    ] = await Promise.all([
+      this.prisma.order.aggregate({
+        where: { status: { in: REVENUE_STATUSES }, createdAt: { gte: monthStart } },
+        _sum: { total: true },
+      }),
+      this.prisma.order.aggregate({
+        where: {
+          status: { in: REVENUE_STATUSES },
+          createdAt: { gte: previousMonthStart, lt: monthStart },
+        },
+        _sum: { total: true },
+      }),
+      this.prisma.order.count({ where: { createdAt: { gte: monthStart } } }),
+      this.prisma.order.count({
+        where: { createdAt: { gte: previousMonthStart, lt: monthStart } },
+      }),
+      this.prisma.user.count({
+        where: { role: UserRole.CUSTOMER, deletedAt: null },
+      }),
+      this.prisma.product.count({ where: { deletedAt: null, isActive: true } }),
+      this.prisma.order.findMany({
+        orderBy: { createdAt: 'desc' },
+        take: 5,
+        include: {
+          user: { select: { id: true, name: true, email: true } },
+          _count: { select: { items: true } },
+        },
+      }),
+    ]);
 
     return {
       totalRevenue: Number(revenue._sum.total ?? 0),
+      revenueGrowthPercent: this.calculateGrowth(
+        Number(revenue._sum.total ?? 0),
+        Number(previousRevenue._sum.total ?? 0),
+      ),
       totalOrders: ordersThisMonth,
       orderGrowthPercent: this.calculateGrowth(ordersThisMonth, ordersPreviousMonth),
       totalCustomers: customers,
@@ -119,6 +137,95 @@ export class DashboardService {
       status,
       count: grouped.find((item) => item.status === status)?._count ?? 0,
     }));
+  }
+
+  async getAlerts() {
+    const now = new Date();
+    const soon = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
+    const [
+      pendingPayment,
+      paidToPack,
+      lowStockVariants,
+      outOfStockVariants,
+      failedPayments,
+      expiredFlashProducts,
+      expiringVouchers,
+    ] = await Promise.all([
+      this.prisma.order.count({ where: { status: OrderStatus.PENDING } }),
+      this.prisma.order.count({ where: { status: OrderStatus.PAID } }),
+      this.prisma.productVariant.count({
+        where: { stock: { gt: 0, lte: 5 }, product: { deletedAt: null, isActive: true } },
+      }),
+      this.prisma.productVariant.count({
+        where: { stock: 0, product: { deletedAt: null, isActive: true } },
+      }),
+      this.prisma.payment.count({
+        where: { status: { in: [PaymentStatus.FAILED, PaymentStatus.EXPIRED] } },
+      }),
+      this.prisma.product.count({
+        where: {
+          deletedAt: null,
+          isActive: true,
+          isFlashSale: true,
+          flashSaleEndsAt: { lt: now },
+        },
+      }),
+      this.prisma.voucher.count({
+        where: { isActive: true, expiresAt: { gte: now, lte: soon } },
+      }),
+    ]);
+
+    return [
+      {
+        id: 'pending-payment',
+        label: 'Pending payment',
+        count: pendingPayment,
+        tone: pendingPayment > 0 ? 'warn' : 'neutral',
+        href: '/orders?status=PENDING',
+      },
+      {
+        id: 'paid-to-pack',
+        label: 'Ready to pack',
+        count: paidToPack,
+        tone: paidToPack > 0 ? 'hot' : 'neutral',
+        href: '/orders?status=PAID',
+      },
+      {
+        id: 'low-stock',
+        label: 'Low-stock variants',
+        count: lowStockVariants,
+        tone: lowStockVariants > 0 ? 'warn' : 'neutral',
+        href: '/catalog',
+      },
+      {
+        id: 'out-of-stock',
+        label: 'Out-of-stock variants',
+        count: outOfStockVariants,
+        tone: outOfStockVariants > 0 ? 'danger' : 'neutral',
+        href: '/catalog',
+      },
+      {
+        id: 'failed-payments',
+        label: 'Failed or expired payments',
+        count: failedPayments,
+        tone: failedPayments > 0 ? 'danger' : 'neutral',
+        href: '/orders',
+      },
+      {
+        id: 'expired-flash',
+        label: 'Expired flash products',
+        count: expiredFlashProducts,
+        tone: expiredFlashProducts > 0 ? 'warn' : 'neutral',
+        href: '/catalog',
+      },
+      {
+        id: 'expiring-vouchers',
+        label: 'Vouchers expiring in 7 days',
+        count: expiringVouchers,
+        tone: expiringVouchers > 0 ? 'warn' : 'neutral',
+        href: '/vouchers',
+      },
+    ];
   }
 
   private periodToDays(period: '7d' | '30d' | '90d' | '1y'): number {

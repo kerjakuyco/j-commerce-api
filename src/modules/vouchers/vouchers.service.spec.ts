@@ -47,4 +47,32 @@ describe('VouchersService', () => {
   it('detects unusable quota', () => {
     expect(service.isUsable(baseVoucher({ quota: 1, usedCount: 1 }))).toBe(false);
   });
+
+  it('clears maxDiscount when update receives null', async () => {
+    const existingVoucher = baseVoucher({
+      maxDiscount: new Prisma.Decimal(15000),
+    });
+    const updatedVoucher = baseVoucher({ maxDiscount: null });
+    const update = jest.fn().mockResolvedValue(updatedVoucher);
+    const tx = {
+      $executeRaw: jest.fn().mockResolvedValue([{ id: existingVoucher.id }]),
+      voucher: {
+        findUnique: jest.fn().mockResolvedValue(existingVoucher),
+        update,
+      },
+    };
+    const prisma = {
+      $transaction: jest.fn((callback: (client: typeof tx) => Promise<Voucher>) => callback(tx)),
+    };
+    const serviceWithPrisma = new VouchersService(prisma as never);
+
+    await expect(serviceWithPrisma.update(existingVoucher.id, { maxDiscount: null })).resolves.toBe(
+      updatedVoucher,
+    );
+    expect(update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ maxDiscount: null }),
+      }),
+    );
+  });
 });

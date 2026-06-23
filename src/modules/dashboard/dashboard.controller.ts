@@ -38,4 +38,10 @@ export class DashboardController {
   getOrderStatusBreakdown() {
     return this.dashboardService.getOrderStatusBreakdown();
   }
+
+  @Get('alerts')
+  @ApiOperation({ summary: 'Operational dashboard alerts' })
+  getAlerts() {
+    return this.dashboardService.getAlerts();
+  }
 }

@@ -18,6 +18,7 @@ import {
 import { randomBytes } from 'crypto';
 import { AuthenticatedUser } from '../../common/decorators/current-user.decorator';
 import { PrismaService } from '../../prisma/prisma.service';
+import { CancelOrderDto } from './dto/cancel-order.dto';
 import { CreateOrderDto } from './dto/create-order.dto';
 import { QueryOrderDto } from './dto/query-order.dto';
 import { UpdateOrderStatusDto } from './dto/update-order-status.dto';
@@ -200,7 +201,11 @@ export class OrdersService {
     return order;
   }
 
-  async cancel(id: string, user: AuthenticatedUser): Promise<OrderWithRelations> {
+  async cancel(
+    id: string,
+    user: AuthenticatedUser,
+    dto: CancelOrderDto = {},
+  ): Promise<OrderWithRelations> {
     const order = await this.findOne(id, user);
     if (order.userId !== user.id && user.role !== UserRole.ADMIN) {
       throw new ForbiddenException('Anda hanya bisa membatalkan pesanan sendiri');
@@ -208,6 +213,8 @@ export class OrdersService {
     if (order.status !== OrderStatus.PENDING && order.status !== OrderStatus.PAID) {
       throw new BadRequestException('Pesanan tidak bisa dibatalkan pada status ini');
     }
+
+    const cancelReason = dto.reason?.trim() || null;
 
     return this.prisma.$transaction(async (tx) => {
       // Lock the order row for the whole critical section so a concurrent
@@ -233,7 +240,12 @@ export class OrdersService {
           : PaymentStatus.EXPIRED;
       const cancelled = await tx.order.updateMany({
         where: { id: locked.id, status: locked.status },
-        data: { status: OrderStatus.CANCELLED, paymentStatus, cancelledAt: new Date() },
+        data: {
+          status: OrderStatus.CANCELLED,
+          paymentStatus,
+          cancelReason,
+          cancelledAt: new Date(),
+        },
       });
       if (cancelled.count === 0) {
         throw new ConflictException(
@@ -254,7 +266,9 @@ export class OrdersService {
         locked.userId,
         locked.id,
         'Pesanan dibatalkan',
-        `Pesanan ${locked.orderNumber} berhasil dibatalkan.`,
+        cancelReason
+          ? `Pesanan ${locked.orderNumber} berhasil dibatalkan. Alasan: ${cancelReason}`
+          : `Pesanan ${locked.orderNumber} berhasil dibatalkan.`,
       );
 
       const updated = await tx.order.findUnique({

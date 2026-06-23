@@ -25,7 +25,7 @@ export class CreateBannerDto {
   @ApiProperty({ required: false })
   @IsOptional()
   @IsString()
-  link?: string;
+  link?: string | null;
 
   @ApiProperty({ required: false, default: 0 })
   @IsOptional()

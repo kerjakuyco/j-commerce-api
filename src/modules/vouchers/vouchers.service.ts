@@ -183,7 +183,12 @@ export class VouchersService {
       value: dto.value !== undefined ? new Prisma.Decimal(dto.value) : undefined,
       description: dto.description,
       minPurchase: dto.minPurchase !== undefined ? new Prisma.Decimal(dto.minPurchase) : undefined,
-      maxDiscount: dto.maxDiscount !== undefined ? new Prisma.Decimal(dto.maxDiscount) : undefined,
+      maxDiscount:
+        dto.maxDiscount === null
+          ? null
+          : dto.maxDiscount !== undefined
+            ? new Prisma.Decimal(dto.maxDiscount)
+            : undefined,
       quota: dto.quota,
       startsAt: dto.startsAt ? new Date(dto.startsAt) : undefined,
       expiresAt: dto.expiresAt ? new Date(dto.expiresAt) : undefined,

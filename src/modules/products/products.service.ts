@@ -20,6 +20,10 @@ export class ProductsService {
       minPrice,
       maxPrice,
       minRating,
+      inStock,
+      hasDiscount,
+      featured,
+      flash,
       sort = 'newest',
     } = query;
     const skip = (page - 1) * limit;
@@ -28,6 +32,7 @@ export class ProductsService {
       deletedAt: null,
       isActive: true,
     };
+    const andFilters: Prisma.ProductWhereInput[] = [];
     if (categoryId) where.categoryId = categoryId;
     if (search) {
       // NOTE: the Product schema declares `@@fulltext([name, brand, description])`
@@ -39,11 +44,13 @@ export class ProductsService {
       // If the index is confirmed present and short-query behavior is
       // acceptable, this can switch to `{ name: { search } }` etc. with a
       // `contains` fallback for queries below the min token length.
-      where.OR = [
-        { name: { contains: search } },
-        { brand: { contains: search } },
-        { description: { contains: search } },
-      ];
+      andFilters.push({
+        OR: [
+          { name: { contains: search } },
+          { brand: { contains: search } },
+          { description: { contains: search } },
+        ],
+      });
     }
     if (minPrice !== undefined || maxPrice !== undefined) {
       const basePriceFilter: Prisma.DecimalFilter = {};
@@ -57,16 +64,24 @@ export class ProductsService {
         discountPriceFilter.lte = maxPrice;
       }
 
-      where.AND = [
-        {
-          OR: [
-            { discountPrice: null, basePrice: basePriceFilter },
-            { discountPrice: { ...discountPriceFilter, not: null } },
-          ],
-        },
-      ];
+      andFilters.push({
+        OR: [
+          { discountPrice: null, basePrice: basePriceFilter },
+          { discountPrice: { ...discountPriceFilter, not: null } },
+        ],
+      });
     }
     if (minRating !== undefined) where.rating = { gte: minRating };
+    if (inStock) where.variants = { some: { stock: { gt: 0 } } };
+    if (hasDiscount) where.discountPrice = { not: null };
+    if (featured) where.isFeatured = true;
+    if (flash) {
+      andFilters.push({
+        isFlashSale: true,
+        OR: [{ flashSaleEndsAt: null }, { flashSaleEndsAt: { gt: new Date() } }],
+      });
+    }
+    if (andFilters.length > 0) where.AND = andFilters;
 
     const orderBy: Prisma.ProductOrderByWithRelationInput = (() => {
       switch (sort) {
@@ -93,6 +108,10 @@ export class ProductsService {
         include: {
           category: { select: { id: true, name: true, slug: true, icon: true } },
           images: { orderBy: { sortOrder: 'asc' }, take: 1 },
+          variants: {
+            orderBy: { price: 'asc' },
+            select: { id: true, name: true, sku: true, price: true, stock: true },
+          },
           _count: { select: { variants: true, reviews: true } },
         },
       }),
@@ -230,7 +249,8 @@ export class ProductsService {
       data.basePrice = new Prisma.Decimal(dto.basePrice);
     }
     if (dto.discountPrice !== undefined) {
-      data.discountPrice = new Prisma.Decimal(dto.discountPrice);
+      data.discountPrice =
+        dto.discountPrice === null ? null : new Prisma.Decimal(dto.discountPrice);
     }
     if (dto.flashSaleEndsAt !== undefined) {
       data.flashSaleEndsAt = dto.flashSaleEndsAt ? new Date(dto.flashSaleEndsAt) : null;
