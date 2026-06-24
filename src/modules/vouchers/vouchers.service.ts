@@ -52,18 +52,30 @@ export class VouchersService {
    * every voucher regardless of state.
    */
   async findAllForAdmin(query: QueryVoucherDto) {
-    const { page = 1, limit = 20 } = query;
-    const where: Prisma.VoucherWhereInput = {};
+    const { page = 1, limit = 20, search, type, status } = query;
+    const now = new Date();
+    const where: Prisma.VoucherWhereInput = {
+      ...(type ? { type } : {}),
+      ...(search?.trim()
+        ? {
+            OR: [
+              { code: { contains: search.trim() } },
+              { description: { contains: search.trim() } },
+            ],
+          }
+        : {}),
+    };
 
-    const [data, total] = await Promise.all([
-      this.prisma.voucher.findMany({
-        where,
-        orderBy: { createdAt: 'desc' },
-        skip: (page - 1) * limit,
-        take: limit,
-      }),
-      this.prisma.voucher.count({ where }),
-    ]);
+    const rows = await this.prisma.voucher.findMany({
+      where,
+      orderBy: { createdAt: 'desc' },
+    });
+
+    const filtered = status
+      ? rows.filter((voucher) => this.adminStatus(voucher, now) === status)
+      : rows;
+    const total = filtered.length;
+    const data = filtered.slice((page - 1) * limit, (page - 1) * limit + limit);
 
     return { data, meta: { total, page, limit, totalPages: Math.ceil(total / limit) } };
   }
@@ -172,6 +184,17 @@ export class VouchersService {
       voucher.expiresAt >= now &&
       voucher.usedCount < voucher.quota
     );
+  }
+
+  private adminStatus(
+    voucher: Voucher,
+    now: Date,
+  ): 'ACTIVE' | 'INACTIVE' | 'SCHEDULED' | 'EXPIRED' | 'EXHAUSTED' {
+    if (!voucher.isActive) return 'INACTIVE';
+    if (voucher.expiresAt < now) return 'EXPIRED';
+    if (voucher.startsAt > now) return 'SCHEDULED';
+    if (voucher.usedCount >= voucher.quota) return 'EXHAUSTED';
+    return 'ACTIVE';
   }
 
   private toPrismaData(

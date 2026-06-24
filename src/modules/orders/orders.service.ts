@@ -167,10 +167,36 @@ export class OrdersService {
   }
 
   async findAll(user: AuthenticatedUser, query: QueryOrderDto) {
-    const { page = 1, limit = 20, status } = query;
+    const {
+      page = 1,
+      limit = 20,
+      status,
+      paymentStatus,
+      shippingMethod,
+      search,
+    } = query;
+    const trimmedSearch = search?.trim();
     const where: Prisma.OrderWhereInput = {
       ...(user.role === UserRole.ADMIN ? {} : { userId: user.id }),
       ...(status ? { status } : {}),
+      ...(paymentStatus ? { paymentStatus } : {}),
+      ...(shippingMethod ? { shippingMethod } : {}),
+      ...(trimmedSearch
+        ? {
+            OR: [
+              { orderNumber: { contains: trimmedSearch } },
+              { trackingNumber: { contains: trimmedSearch } },
+              { user: { is: { name: { contains: trimmedSearch } } } },
+              { user: { is: { email: { contains: trimmedSearch } } } },
+              { user: { is: { phone: { contains: trimmedSearch } } } },
+              { address: { is: { recipient: { contains: trimmedSearch } } } },
+              { address: { is: { phone: { contains: trimmedSearch } } } },
+              { address: { is: { city: { contains: trimmedSearch } } } },
+              { voucher: { is: { code: { contains: trimmedSearch } } } },
+              { items: { some: { productName: { contains: trimmedSearch } } } },
+            ],
+          }
+        : {}),
     };
 
     const [data, total] = await Promise.all([

@@ -30,10 +30,11 @@ export class UsersService {
   constructor(private readonly prisma: PrismaService) {}
 
   async findAll(query: QueryUserDto) {
-    const { page = 1, limit = 20, search, role } = query;
+    const { page = 1, limit = 20, search, role, isActive } = query;
     const where: Prisma.UserWhereInput = { deletedAt: null };
 
     if (role) where.role = role;
+    if (isActive !== undefined) where.isActive = isActive;
     if (search) {
       where.OR = [
         { name: { contains: search } },

@@ -1,13 +1,28 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { OrderStatus } from '@prisma/client';
+import { OrderStatus, PaymentStatus, ShippingMethod } from '@prisma/client';
 import { Type } from 'class-transformer';
-import { IsEnum, IsInt, IsOptional, Max, Min } from 'class-validator';
+import { IsEnum, IsInt, IsOptional, IsString, Max, Min } from 'class-validator';
 
 export class QueryOrderDto {
   @ApiProperty({ required: false, enum: OrderStatus })
   @IsOptional()
   @IsEnum(OrderStatus)
   status?: OrderStatus;
+
+  @ApiProperty({ required: false, enum: PaymentStatus })
+  @IsOptional()
+  @IsEnum(PaymentStatus)
+  paymentStatus?: PaymentStatus;
+
+  @ApiProperty({ required: false, enum: ShippingMethod })
+  @IsOptional()
+  @IsEnum(ShippingMethod)
+  shippingMethod?: ShippingMethod;
+
+  @ApiProperty({ required: false })
+  @IsOptional()
+  @IsString()
+  search?: string;
 
   @ApiProperty({ required: false, default: 1 })
   @IsOptional()

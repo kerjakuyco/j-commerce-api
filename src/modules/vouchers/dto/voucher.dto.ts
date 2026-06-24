@@ -5,6 +5,7 @@ import {
   IsBoolean,
   IsDateString,
   IsEnum,
+  IsIn,
   IsInt,
   IsNotEmpty,
   IsNumber,
@@ -108,4 +109,22 @@ export class QueryVoucherDto {
   @Min(1)
   @Max(100)
   limit?: number = 20;
+
+  @ApiProperty({ required: false })
+  @IsOptional()
+  @IsString()
+  search?: string;
+
+  @ApiProperty({ required: false, enum: VoucherType })
+  @IsOptional()
+  @IsEnum(VoucherType)
+  type?: VoucherType;
+
+  @ApiProperty({
+    required: false,
+    enum: ['ACTIVE', 'INACTIVE', 'SCHEDULED', 'EXPIRED', 'EXHAUSTED'],
+  })
+  @IsOptional()
+  @IsIn(['ACTIVE', 'INACTIVE', 'SCHEDULED', 'EXPIRED', 'EXHAUSTED'])
+  status?: 'ACTIVE' | 'INACTIVE' | 'SCHEDULED' | 'EXPIRED' | 'EXHAUSTED';
 }
