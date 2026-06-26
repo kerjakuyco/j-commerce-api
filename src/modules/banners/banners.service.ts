@@ -54,4 +54,17 @@ export class BannersService {
 
     return { message: 'Banner berhasil dinonaktifkan' };
   }
+
+  async removePermanent(id: string): Promise<{ message: string }> {
+    try {
+      await this.prisma.banner.delete({ where: { id } });
+    } catch (e) {
+      if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2025') {
+        throw new NotFoundException('Banner tidak ditemukan');
+      }
+      throw e;
+    }
+
+    return { message: 'Banner berhasil dihapus permanen' };
+  }
 }

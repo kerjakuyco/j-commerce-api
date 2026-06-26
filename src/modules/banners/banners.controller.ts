@@ -68,6 +68,16 @@ export class BannersController {
   @UseGuards(JwtAuthGuard, RolesGuard)
   @ApiBearerAuth('access-token')
   @Roles(UserRole.ADMIN)
+  @Delete(':id/permanent')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Permanently delete banner (admin only)' })
+  removePermanent(@Param('id') id: string) {
+    return this.bannersService.removePermanent(id);
+  }
+
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @ApiBearerAuth('access-token')
+  @Roles(UserRole.ADMIN)
   @Delete(':id')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Deactivate banner (admin only)' })

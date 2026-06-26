@@ -30,7 +30,15 @@ export class UsersService {
   constructor(private readonly prisma: PrismaService) {}
 
   async findAll(query: QueryUserDto) {
-    const { page = 1, limit = 20, search, role, isActive } = query;
+    const {
+      page = 1,
+      limit = 20,
+      search,
+      role,
+      isActive,
+      sortBy = 'createdAt',
+      sortDir = 'desc',
+    } = query;
     const where: Prisma.UserWhereInput = { deletedAt: null };
 
     if (role) where.role = role;
@@ -43,11 +51,27 @@ export class UsersService {
       ];
     }
 
+    const orderBy: Prisma.UserOrderByWithRelationInput[] = (() => {
+      switch (sortBy) {
+        case 'name':
+          return [{ name: sortDir }, { id: 'asc' }];
+        case 'email':
+          return [{ email: sortDir }, { id: 'asc' }];
+        case 'role':
+          return [{ role: sortDir }, { id: 'asc' }];
+        case 'isActive':
+          return [{ isActive: sortDir }, { id: 'asc' }];
+        case 'createdAt':
+        default:
+          return [{ createdAt: sortDir }, { id: 'asc' }];
+      }
+    })();
+
     const [data, total] = await Promise.all([
       this.prisma.user.findMany({
         where,
         select: USER_SELECT,
-        orderBy: { createdAt: 'desc' },
+        orderBy,
         skip: (page - 1) * limit,
         take: limit,
       }),

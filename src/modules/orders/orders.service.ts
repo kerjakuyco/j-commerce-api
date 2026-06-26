@@ -20,7 +20,11 @@ import { AuthenticatedUser } from '../../common/decorators/current-user.decorato
 import { PrismaService } from '../../prisma/prisma.service';
 import { CancelOrderDto } from './dto/cancel-order.dto';
 import { CreateOrderDto } from './dto/create-order.dto';
-import { QueryOrderDto } from './dto/query-order.dto';
+import {
+  QueryOrderDto,
+  type OrderSortDirection,
+  type OrderSortField,
+} from './dto/query-order.dto';
 import { UpdateOrderStatusDto } from './dto/update-order-status.dto';
 
 const ORDER_INCLUDE = {
@@ -35,6 +39,11 @@ const ORDER_INCLUDE = {
       variant: { select: { id: true, sku: true, stock: true } },
     },
   },
+} satisfies Prisma.OrderInclude;
+
+const ORDER_ADMIN_LIST_INCLUDE = {
+  user: { select: { id: true, name: true, email: true, phone: true } },
+  _count: { select: { items: true } },
 } satisfies Prisma.OrderInclude;
 
 type OrderWithRelations = Prisma.OrderGetPayload<{ include: typeof ORDER_INCLUDE }>;
@@ -174,8 +183,13 @@ export class OrdersService {
       paymentStatus,
       shippingMethod,
       search,
+      sortBy = 'createdAt',
+      sortDir = 'desc',
     } = query;
     const trimmedSearch = search?.trim();
+    const orderBy = this.orderSort(sortBy, sortDir);
+    const include: Prisma.OrderInclude =
+      user.role === UserRole.ADMIN ? ORDER_ADMIN_LIST_INCLUDE : ORDER_INCLUDE;
     const where: Prisma.OrderWhereInput = {
       ...(user.role === UserRole.ADMIN ? {} : { userId: user.id }),
       ...(status ? { status } : {}),
@@ -202,8 +216,8 @@ export class OrdersService {
     const [data, total] = await Promise.all([
       this.prisma.order.findMany({
         where,
-        include: ORDER_INCLUDE,
-        orderBy: { createdAt: 'desc' },
+        include,
+        orderBy,
         skip: (page - 1) * limit,
         take: limit,
       }),
@@ -211,6 +225,30 @@ export class OrdersService {
     ]);
 
     return { data, meta: { total, page, limit, totalPages: Math.ceil(total / limit) } };
+  }
+
+  private orderSort(
+    sortBy: OrderSortField,
+    direction: OrderSortDirection,
+  ): Prisma.OrderOrderByWithRelationInput[] {
+    const fallback: Prisma.OrderOrderByWithRelationInput[] =
+      sortBy === 'createdAt'
+        ? [{ id: 'desc' }]
+        : [{ createdAt: 'desc' }, { id: 'desc' }];
+
+    switch (sortBy) {
+      case 'orderNumber':
+        return [{ orderNumber: direction }, ...fallback];
+      case 'status':
+        return [{ status: direction }, ...fallback];
+      case 'paymentStatus':
+        return [{ paymentStatus: direction }, ...fallback];
+      case 'total':
+        return [{ total: direction }, ...fallback];
+      case 'createdAt':
+      default:
+        return [{ createdAt: direction }, ...fallback];
+    }
   }
 
   async findOne(id: string, user: AuthenticatedUser): Promise<OrderWithRelations> {

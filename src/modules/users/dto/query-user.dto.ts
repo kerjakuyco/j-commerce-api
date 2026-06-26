@@ -1,7 +1,7 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { UserRole } from '@prisma/client';
 import { Transform, Type } from 'class-transformer';
-import { IsBoolean, IsEnum, IsInt, IsOptional, IsString, Max, Min } from 'class-validator';
+import { IsBoolean, IsEnum, IsIn, IsInt, IsOptional, IsString, Max, Min } from 'class-validator';
 
 export class QueryUserDto {
   @ApiProperty({ required: false, default: 1 })
@@ -31,11 +31,22 @@ export class QueryUserDto {
 
   @ApiProperty({ required: false, type: Boolean })
   @IsOptional()
-  @Transform(({ value }) => {
-    if (value === 'true') return true;
-    if (value === 'false') return false;
-    return value;
+  @Transform(({ value, obj, key }) => {
+    const raw = typeof key === 'string' && obj ? (obj as Record<string, unknown>)[key] : value;
+    if (raw === true || raw === 'true') return true;
+    if (raw === false || raw === 'false') return false;
+    return raw;
   })
   @IsBoolean()
   isActive?: boolean;
+
+  @ApiProperty({ required: false, enum: ['name', 'email', 'role', 'createdAt', 'isActive'] })
+  @IsOptional()
+  @IsIn(['name', 'email', 'role', 'createdAt', 'isActive'])
+  sortBy?: 'name' | 'email' | 'role' | 'createdAt' | 'isActive';
+
+  @ApiProperty({ required: false, enum: ['asc', 'desc'] })
+  @IsOptional()
+  @IsIn(['asc', 'desc'])
+  sortDir?: 'asc' | 'desc';
 }

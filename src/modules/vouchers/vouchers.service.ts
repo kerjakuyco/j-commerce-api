@@ -18,8 +18,9 @@ export class VouchersService {
   constructor(private readonly prisma: PrismaService) {}
 
   async findAll(query: QueryVoucherDto) {
-    const { page = 1, limit = 20 } = query;
+    const { page = 1, limit = 20, sortBy = 'expiresAt', sortDir = 'asc' } = query;
     const now = new Date();
+    const orderBy = this.voucherOrderBy(sortBy, sortDir);
     const where: Prisma.VoucherWhereInput = {
       isActive: true,
       startsAt: { lte: now },
@@ -35,7 +36,7 @@ export class VouchersService {
     // yield short pages and a misleading total.
     const rows = await this.prisma.voucher.findMany({
       where,
-      orderBy: { expiresAt: 'asc' },
+      orderBy,
     });
 
     const usable = rows.filter((voucher) => voucher.usedCount < voucher.quota);
@@ -52,9 +53,18 @@ export class VouchersService {
    * every voucher regardless of state.
    */
   async findAllForAdmin(query: QueryVoucherDto) {
-    const { page = 1, limit = 20, search, type, status } = query;
+    const {
+      page = 1,
+      limit = 20,
+      search,
+      type,
+      status,
+      sortBy = 'createdAt',
+      sortDir = 'desc',
+    } = query;
     const now = new Date();
-    const where: Prisma.VoucherWhereInput = {
+    const orderBy = this.voucherOrderBy(sortBy, sortDir);
+    const baseWhere: Prisma.VoucherWhereInput = {
       ...(type ? { type } : {}),
       ...(search?.trim()
         ? {
@@ -66,18 +76,94 @@ export class VouchersService {
         : {}),
     };
 
+    if (!status) {
+      return this.paginatedVouchers(baseWhere, page, limit, orderBy);
+    }
+
+    const simpleStatusWhere = this.simpleAdminStatusWhere(status, now);
+    if (simpleStatusWhere) {
+      return this.paginatedVouchers(
+        { ...baseWhere, ...simpleStatusWhere },
+        page,
+        limit,
+        orderBy,
+      );
+    }
+
+    const inWindowWhere: Prisma.VoucherWhereInput = {
+      ...baseWhere,
+      isActive: true,
+      startsAt: { lte: now },
+      expiresAt: { gte: now },
+    };
     const rows = await this.prisma.voucher.findMany({
-      where,
-      orderBy: { createdAt: 'desc' },
+      where: inWindowWhere,
+      orderBy,
     });
 
-    const filtered = status
-      ? rows.filter((voucher) => this.adminStatus(voucher, now) === status)
-      : rows;
+    const filtered = rows.filter((voucher) => this.adminStatus(voucher, now) === status);
     const total = filtered.length;
     const data = filtered.slice((page - 1) * limit, (page - 1) * limit + limit);
 
     return { data, meta: { total, page, limit, totalPages: Math.ceil(total / limit) } };
+  }
+
+  private async paginatedVouchers(
+    where: Prisma.VoucherWhereInput,
+    page: number,
+    limit: number,
+    orderBy: Prisma.VoucherOrderByWithRelationInput[],
+  ) {
+    const [data, total] = await Promise.all([
+      this.prisma.voucher.findMany({
+        where,
+        orderBy,
+        skip: (page - 1) * limit,
+        take: limit,
+      }),
+      this.prisma.voucher.count({ where }),
+    ]);
+
+    return { data, meta: { total, page, limit, totalPages: Math.ceil(total / limit) } };
+  }
+
+  private voucherOrderBy(
+    sortBy: NonNullable<QueryVoucherDto['sortBy']>,
+    sortDir: NonNullable<QueryVoucherDto['sortDir']>,
+  ): Prisma.VoucherOrderByWithRelationInput[] {
+    switch (sortBy) {
+      case 'code':
+        return [{ code: sortDir }, { id: 'asc' }];
+      case 'type':
+        return [{ type: sortDir }, { id: 'asc' }];
+      case 'value':
+        return [{ value: sortDir }, { id: 'asc' }];
+      case 'quota':
+        return [{ quota: sortDir }, { id: 'asc' }];
+      case 'usedCount':
+        return [{ usedCount: sortDir }, { id: 'asc' }];
+      case 'minPurchase':
+        return [{ minPurchase: sortDir }, { id: 'asc' }];
+      case 'startsAt':
+        return [{ startsAt: sortDir }, { id: 'asc' }];
+      case 'expiresAt':
+        return [{ expiresAt: sortDir }, { id: 'asc' }];
+      case 'isActive':
+        return [{ isActive: sortDir }, { id: 'asc' }];
+      case 'createdAt':
+      default:
+        return [{ createdAt: sortDir }, { id: 'asc' }];
+    }
+  }
+
+  private simpleAdminStatusWhere(
+    status: NonNullable<QueryVoucherDto['status']>,
+    now: Date,
+  ): Prisma.VoucherWhereInput | null {
+    if (status === 'INACTIVE') return { isActive: false };
+    if (status === 'EXPIRED') return { isActive: true, expiresAt: { lt: now } };
+    if (status === 'SCHEDULED') return { isActive: true, startsAt: { gt: now } };
+    return null;
   }
 
   async findByCode(code: string): Promise<Voucher> {
@@ -138,6 +224,35 @@ export class VouchersService {
     }
 
     return { message: 'Voucher berhasil dinonaktifkan' };
+  }
+
+  async removePermanent(id: string): Promise<{ message: string }> {
+    try {
+      return await this.prisma.$transaction(async (tx) => {
+        const voucher = await tx.voucher.findUnique({ where: { id } });
+        if (!voucher) throw new NotFoundException('Voucher tidak ditemukan');
+
+        const orderCount = await tx.order.count({ where: { voucherId: id } });
+        if (voucher.usedCount > 0 || orderCount > 0) {
+          throw new BadRequestException(
+            'Voucher yang sudah digunakan tidak bisa dihapus permanen',
+          );
+        }
+
+        await tx.voucher.delete({ where: { id } });
+        return { message: 'Voucher berhasil dihapus permanen' };
+      });
+    } catch (e) {
+      if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2025') {
+        throw new NotFoundException('Voucher tidak ditemukan');
+      }
+      if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2003') {
+        throw new BadRequestException(
+          'Voucher yang sudah digunakan tidak bisa dihapus permanen',
+        );
+      }
+      throw e;
+    }
   }
 
   async validate(dto: ValidateVoucherDto) {

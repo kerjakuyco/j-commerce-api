@@ -127,4 +127,27 @@ export class QueryVoucherDto {
   @IsOptional()
   @IsIn(['ACTIVE', 'INACTIVE', 'SCHEDULED', 'EXPIRED', 'EXHAUSTED'])
   status?: 'ACTIVE' | 'INACTIVE' | 'SCHEDULED' | 'EXPIRED' | 'EXHAUSTED';
+
+  @ApiProperty({
+    required: false,
+    enum: ['code', 'type', 'value', 'quota', 'usedCount', 'minPurchase', 'startsAt', 'expiresAt', 'isActive', 'createdAt'],
+  })
+  @IsOptional()
+  @IsIn(['code', 'type', 'value', 'quota', 'usedCount', 'minPurchase', 'startsAt', 'expiresAt', 'isActive', 'createdAt'])
+  sortBy?:
+    | 'code'
+    | 'type'
+    | 'value'
+    | 'quota'
+    | 'usedCount'
+    | 'minPurchase'
+    | 'startsAt'
+    | 'expiresAt'
+    | 'isActive'
+    | 'createdAt';
+
+  @ApiProperty({ required: false, enum: ['asc', 'desc'] })
+  @IsOptional()
+  @IsIn(['asc', 'desc'])
+  sortDir?: 'asc' | 'desc';
 }

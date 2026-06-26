@@ -81,6 +81,11 @@ model User {
 
   @@index([role, deletedAt])
   @@index([createdAt])
+  @@index([deletedAt, name])
+  @@index([deletedAt, email])
+  @@index([deletedAt, role])
+  @@index([deletedAt, isActive])
+  @@index([deletedAt, createdAt])
   @@map("users")
 }
 
@@ -118,6 +123,7 @@ model Category {
   products Product[]
 
   @@index([sortOrder, deletedAt])
+  @@index([name])
   @@map("categories")
 }
 
@@ -155,6 +161,12 @@ model Product {
   @@index([isFlashSale, flashSaleEndsAt])
   @@index([basePrice])
   @@index([rating])
+  @@index([deletedAt, isActive, createdAt])
+  @@index([deletedAt, isActive, name])
+  @@index([deletedAt, isActive, brand])
+  @@index([deletedAt, isActive, basePrice])
+  @@index([deletedAt, isActive, rating])
+  @@index([deletedAt, isActive, totalSold])
   @@fulltext([name, brand, description])
   @@map("products")
 }
@@ -304,6 +316,8 @@ model Order {
   @@index([userId, createdAt])
   @@index([status, createdAt])
   @@index([paymentStatus])
+  @@index([createdAt])
+  @@index([total])
   @@map("orders")
 }
 
@@ -405,6 +419,15 @@ model Voucher {
   orders Order[]
 
   @@index([isActive, expiresAt])
+  @@index([createdAt])
+  @@index([type])
+  @@index([value])
+  @@index([quota])
+  @@index([usedCount])
+  @@index([minPurchase])
+  @@index([startsAt])
+  @@index([expiresAt])
+  @@index([isActive])
   @@map("vouchers")
 }
 

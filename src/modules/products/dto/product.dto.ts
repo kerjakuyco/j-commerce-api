@@ -4,6 +4,7 @@ import {
   IsArray,
   IsBoolean,
   IsDateString,
+  IsIn,
   IsInt,
   IsNotEmpty,
   IsNumber,
@@ -208,6 +209,19 @@ export class QueryProductDto {
   @IsOptional()
   @IsString()
   sort?: 'newest' | 'price_asc' | 'price_desc' | 'rating' | 'sold';
+
+  @ApiProperty({
+    required: false,
+    enum: ['createdAt', 'name', 'brand', 'category', 'basePrice', 'rating', 'totalSold'],
+  })
+  @IsOptional()
+  @IsIn(['createdAt', 'name', 'brand', 'category', 'basePrice', 'rating', 'totalSold'])
+  sortBy?: 'createdAt' | 'name' | 'brand' | 'category' | 'basePrice' | 'rating' | 'totalSold';
+
+  @ApiProperty({ required: false, enum: ['asc', 'desc'] })
+  @IsOptional()
+  @IsIn(['asc', 'desc'])
+  sortDir?: 'asc' | 'desc';
 
   @ApiProperty({ required: false, description: 'Only products with stock available' })
   @IsOptional()

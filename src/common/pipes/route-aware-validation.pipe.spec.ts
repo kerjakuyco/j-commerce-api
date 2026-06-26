@@ -1,5 +1,6 @@
 import { ArgumentMetadata } from '@nestjs/common';
 import { IsNotEmpty, IsString } from 'class-validator';
+import { QueryUserDto } from '../../modules/users/dto/query-user.dto';
 import { LooseValidation, RouteAwareValidationPipe } from './route-aware-validation.pipe';
 
 class StrictDto {
@@ -43,5 +44,23 @@ describe('RouteAwareValidationPipe', () => {
 
   it('still validates required fields on a @LooseValidation DTO', async () => {
     await expect(pipe.transform({ status_code: '200' }, meta(LooseDto))).rejects.toBeDefined();
+  });
+
+  it('preserves false boolean query params with implicit conversion enabled', async () => {
+    const result = (await pipe.transform(
+      { isActive: 'false', limit: '10', page: '1' },
+      { ...meta(QueryUserDto), type: 'query' },
+    )) as QueryUserDto;
+
+    expect(result.isActive).toBe(false);
+  });
+
+  it('rejects invalid boolean query params', async () => {
+    await expect(
+      pipe.transform(
+        { isActive: 'disabled', limit: '10', page: '1' },
+        { ...meta(QueryUserDto), type: 'query' },
+      ),
+    ).rejects.toBeDefined();
   });
 });
