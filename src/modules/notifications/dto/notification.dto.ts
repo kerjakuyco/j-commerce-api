@@ -1,6 +1,6 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { NotificationType } from '@prisma/client';
-import { Transform, Type } from 'class-transformer';
+import { Transform, Type, type TransformFnParams } from 'class-transformer';
 import {
   IsBoolean,
   IsEnum,
@@ -13,6 +13,13 @@ import {
   MaxLength,
   Min,
 } from 'class-validator';
+
+function booleanQueryParam({ value, obj, key }: TransformFnParams) {
+  const raw = typeof key === 'string' && obj ? (obj as Record<string, unknown>)[key] : value;
+  if (raw === true || raw === 'true') return true;
+  if (raw === false || raw === 'false') return false;
+  return raw;
+}
 
 export class QueryNotificationDto {
   @ApiProperty({ required: false, default: 1 })
@@ -32,7 +39,7 @@ export class QueryNotificationDto {
 
   @ApiProperty({ required: false })
   @IsOptional()
-  @Transform(({ value }) => value === true || value === 'true')
+  @Transform(booleanQueryParam)
   @IsBoolean()
   unreadOnly?: boolean;
 }

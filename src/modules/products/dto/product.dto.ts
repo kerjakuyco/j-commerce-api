@@ -1,5 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { Transform, Type } from 'class-transformer';
+import { Transform, Type, type TransformFnParams } from 'class-transformer';
 import {
   IsArray,
   IsBoolean,
@@ -16,6 +16,13 @@ import {
   ValidateNested,
 } from 'class-validator';
 import { ProductImageInput, ProductVariantInput } from './shared.dto';
+
+function booleanQueryParam({ value, obj, key }: TransformFnParams) {
+  const raw = typeof key === 'string' && obj ? (obj as Record<string, unknown>)[key] : value;
+  if (raw === true || raw === 'true') return true;
+  if (raw === false || raw === 'false') return false;
+  return raw;
+}
 
 export class CreateProductDto {
   @ApiProperty()
@@ -225,25 +232,25 @@ export class QueryProductDto {
 
   @ApiProperty({ required: false, description: 'Only products with stock available' })
   @IsOptional()
-  @Transform(({ value }) => value === true || value === 'true')
+  @Transform(booleanQueryParam)
   @IsBoolean()
   inStock?: boolean;
 
   @ApiProperty({ required: false, description: 'Only discounted products' })
   @IsOptional()
-  @Transform(({ value }) => value === true || value === 'true')
+  @Transform(booleanQueryParam)
   @IsBoolean()
   hasDiscount?: boolean;
 
   @ApiProperty({ required: false, description: 'Only featured products' })
   @IsOptional()
-  @Transform(({ value }) => value === true || value === 'true')
+  @Transform(booleanQueryParam)
   @IsBoolean()
   featured?: boolean;
 
   @ApiProperty({ required: false, description: 'Only active flash-sale products' })
   @IsOptional()
-  @Transform(({ value }) => value === true || value === 'true')
+  @Transform(booleanQueryParam)
   @IsBoolean()
   flash?: boolean;
 }

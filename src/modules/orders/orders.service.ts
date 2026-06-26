@@ -20,11 +20,7 @@ import { AuthenticatedUser } from '../../common/decorators/current-user.decorato
 import { PrismaService } from '../../prisma/prisma.service';
 import { CancelOrderDto } from './dto/cancel-order.dto';
 import { CreateOrderDto } from './dto/create-order.dto';
-import {
-  QueryOrderDto,
-  type OrderSortDirection,
-  type OrderSortField,
-} from './dto/query-order.dto';
+import { QueryOrderDto, type OrderSortDirection, type OrderSortField } from './dto/query-order.dto';
 import { UpdateOrderStatusDto } from './dto/update-order-status.dto';
 
 const ORDER_INCLUDE = {
@@ -232,9 +228,7 @@ export class OrdersService {
     direction: OrderSortDirection,
   ): Prisma.OrderOrderByWithRelationInput[] {
     const fallback: Prisma.OrderOrderByWithRelationInput[] =
-      sortBy === 'createdAt'
-        ? [{ id: 'desc' }]
-        : [{ createdAt: 'desc' }, { id: 'desc' }];
+      sortBy === 'createdAt' ? [{ id: 'desc' }] : [{ createdAt: 'desc' }, { id: 'desc' }];
 
     switch (sortBy) {
       case 'orderNumber':

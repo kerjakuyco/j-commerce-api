@@ -1,6 +1,10 @@
 import { ArgumentMetadata } from '@nestjs/common';
+import { VoucherType } from '@prisma/client';
 import { IsNotEmpty, IsString } from 'class-validator';
+import { QueryNotificationDto } from '../../modules/notifications/dto/notification.dto';
+import { QueryProductDto } from '../../modules/products/dto/product.dto';
 import { QueryUserDto } from '../../modules/users/dto/query-user.dto';
+import { CreateVoucherDto } from '../../modules/vouchers/dto/voucher.dto';
 import { LooseValidation, RouteAwareValidationPipe } from './route-aware-validation.pipe';
 
 class StrictDto {
@@ -55,11 +59,69 @@ describe('RouteAwareValidationPipe', () => {
     expect(result.isActive).toBe(false);
   });
 
+  it('preserves false product boolean query params with implicit conversion enabled', async () => {
+    const result = (await pipe.transform(
+      {
+        inStock: 'false',
+        hasDiscount: 'false',
+        featured: 'false',
+        flash: 'false',
+        limit: '10',
+        page: '1',
+      },
+      { ...meta(QueryProductDto), type: 'query' },
+    )) as QueryProductDto;
+
+    expect(result.inStock).toBe(false);
+    expect(result.hasDiscount).toBe(false);
+    expect(result.featured).toBe(false);
+    expect(result.flash).toBe(false);
+  });
+
+  it('preserves false notification boolean query params with implicit conversion enabled', async () => {
+    const result = (await pipe.transform(
+      { unreadOnly: 'false', limit: '10', page: '1' },
+      { ...meta(QueryNotificationDto), type: 'query' },
+    )) as QueryNotificationDto;
+
+    expect(result.unreadOnly).toBe(false);
+  });
+
   it('rejects invalid boolean query params', async () => {
     await expect(
       pipe.transform(
         { isActive: 'disabled', limit: '10', page: '1' },
         { ...meta(QueryUserDto), type: 'query' },
+      ),
+    ).rejects.toBeDefined();
+  });
+
+  it('validates fixed voucher values instead of skipping value validators', async () => {
+    await expect(
+      pipe.transform(
+        {
+          code: 'FIXED-BAD',
+          type: VoucherType.FIXED,
+          value: '-1',
+          quota: '10',
+          expiresAt: '2027-01-01T00:00:00.000Z',
+        },
+        meta(CreateVoucherDto),
+      ),
+    ).rejects.toBeDefined();
+  });
+
+  it('rejects percentage voucher values over 100', async () => {
+    await expect(
+      pipe.transform(
+        {
+          code: 'PERCENT-BAD',
+          type: VoucherType.PERCENTAGE,
+          value: '101',
+          quota: '10',
+          expiresAt: '2027-01-01T00:00:00.000Z',
+        },
+        meta(CreateVoucherDto),
       ),
     ).rejects.toBeDefined();
   });

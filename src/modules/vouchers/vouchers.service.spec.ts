@@ -77,6 +77,26 @@ describe('VouchersService', () => {
     );
   });
 
+  it('rejects changing a high-value fixed voucher into a percentage voucher', async () => {
+    const existingVoucher = baseVoucher({ value: new Prisma.Decimal(10000) });
+    const tx = {
+      $executeRaw: jest.fn().mockResolvedValue([{ id: existingVoucher.id }]),
+      voucher: {
+        findUnique: jest.fn().mockResolvedValue(existingVoucher),
+        update: jest.fn(),
+      },
+    };
+    const prisma = {
+      $transaction: jest.fn((callback: (client: typeof tx) => Promise<Voucher>) => callback(tx)),
+    };
+    const serviceWithPrisma = new VouchersService(prisma as never);
+
+    await expect(
+      serviceWithPrisma.update(existingVoucher.id, { type: VoucherType.PERCENTAGE }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(tx.voucher.update).not.toHaveBeenCalled();
+  });
+
   it('permanently deletes unused vouchers', async () => {
     const voucher = baseVoucher();
     const tx = {

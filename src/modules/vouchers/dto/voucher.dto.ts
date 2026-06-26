@@ -14,8 +14,24 @@ import {
   Max,
   MaxLength,
   Min,
-  ValidateIf,
+  Validate,
+  ValidationArguments,
+  ValidatorConstraint,
+  ValidatorConstraintInterface,
 } from 'class-validator';
+
+@ValidatorConstraint({ name: 'percentageVoucherValue', async: false })
+class PercentageVoucherValueConstraint implements ValidatorConstraintInterface {
+  validate(value: unknown, args: ValidationArguments): boolean {
+    const voucher = args.object as { type?: VoucherType };
+    if (voucher.type !== VoucherType.PERCENTAGE) return true;
+    return typeof value === 'number' && value <= 100;
+  }
+
+  defaultMessage(): string {
+    return 'Percentage voucher value must not exceed 100';
+  }
+}
 
 export class CreateVoucherDto {
   @ApiProperty({ example: 'HEMAT10' })
@@ -32,10 +48,7 @@ export class CreateVoucherDto {
   @Type(() => Number)
   @IsNumber({ maxDecimalPlaces: 2 })
   @Min(0)
-  // A PERCENTAGE voucher value > 100 would discount more than the purchase
-  // amount before the maxDiscount/purchase-amount caps kick in, so cap it.
-  @ValidateIf((o) => o.type === VoucherType.PERCENTAGE)
-  @Max(100)
+  @Validate(PercentageVoucherValueConstraint)
   value!: number;
 
   @ApiProperty({ required: false })
@@ -130,10 +143,32 @@ export class QueryVoucherDto {
 
   @ApiProperty({
     required: false,
-    enum: ['code', 'type', 'value', 'quota', 'usedCount', 'minPurchase', 'startsAt', 'expiresAt', 'isActive', 'createdAt'],
+    enum: [
+      'code',
+      'type',
+      'value',
+      'quota',
+      'usedCount',
+      'minPurchase',
+      'startsAt',
+      'expiresAt',
+      'isActive',
+      'createdAt',
+    ],
   })
   @IsOptional()
-  @IsIn(['code', 'type', 'value', 'quota', 'usedCount', 'minPurchase', 'startsAt', 'expiresAt', 'isActive', 'createdAt'])
+  @IsIn([
+    'code',
+    'type',
+    'value',
+    'quota',
+    'usedCount',
+    'minPurchase',
+    'startsAt',
+    'expiresAt',
+    'isActive',
+    'createdAt',
+  ])
   sortBy?:
     | 'code'
     | 'type'

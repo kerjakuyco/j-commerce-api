@@ -82,12 +82,7 @@ export class VouchersService {
 
     const simpleStatusWhere = this.simpleAdminStatusWhere(status, now);
     if (simpleStatusWhere) {
-      return this.paginatedVouchers(
-        { ...baseWhere, ...simpleStatusWhere },
-        page,
-        limit,
-        orderBy,
-      );
+      return this.paginatedVouchers({ ...baseWhere, ...simpleStatusWhere }, page, limit, orderBy);
     }
 
     const inWindowWhere: Prisma.VoucherWhereInput = {
@@ -178,6 +173,7 @@ export class VouchersService {
   }
 
   async create(dto: CreateVoucherDto): Promise<Voucher> {
+    this.assertValidPercentageValue(dto.type, dto.value);
     try {
       return await this.prisma.voucher.create({
         data: this.toPrismaData(dto) as Prisma.VoucherUncheckedCreateInput,
@@ -198,6 +194,10 @@ export class VouchersService {
       if (dto.quota !== undefined && dto.quota < voucher.usedCount) {
         throw new BadRequestException('Kuota tidak boleh lebih kecil dari jumlah terpakai');
       }
+      this.assertValidPercentageValue(
+        dto.type ?? voucher.type,
+        dto.value ?? voucher.value.toNumber(),
+      );
 
       try {
         return await tx.voucher.update({
@@ -234,9 +234,7 @@ export class VouchersService {
 
         const orderCount = await tx.order.count({ where: { voucherId: id } });
         if (voucher.usedCount > 0 || orderCount > 0) {
-          throw new BadRequestException(
-            'Voucher yang sudah digunakan tidak bisa dihapus permanen',
-          );
+          throw new BadRequestException('Voucher yang sudah digunakan tidak bisa dihapus permanen');
         }
 
         await tx.voucher.delete({ where: { id } });
@@ -247,11 +245,15 @@ export class VouchersService {
         throw new NotFoundException('Voucher tidak ditemukan');
       }
       if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2003') {
-        throw new BadRequestException(
-          'Voucher yang sudah digunakan tidak bisa dihapus permanen',
-        );
+        throw new BadRequestException('Voucher yang sudah digunakan tidak bisa dihapus permanen');
       }
       throw e;
+    }
+  }
+
+  private assertValidPercentageValue(type: VoucherType, value: number) {
+    if (type === VoucherType.PERCENTAGE && value > 100) {
+      throw new BadRequestException('Nilai persentase voucher maksimal 100');
     }
   }
 

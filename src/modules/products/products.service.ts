@@ -1,4 +1,9 @@
-import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { Prisma, Product } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreateProductDto, QueryProductDto, UpdateProductDto } from './dto/product.dto';
@@ -295,6 +300,7 @@ export class ProductsService {
 
   async create(dto: CreateProductDto): Promise<Product> {
     const { variants, images, ...data } = dto;
+    this.assertValidDiscountPrice(data.basePrice, data.discountPrice);
     try {
       return await this.prisma.product.create({
         data: {
@@ -327,6 +333,19 @@ export class ProductsService {
   }
 
   async update(id: string, dto: UpdateProductDto): Promise<Product> {
+    const current = await this.prisma.product.findUnique({
+      where: { id },
+      select: { basePrice: true, discountPrice: true },
+    });
+    if (!current) {
+      throw new NotFoundException(`Produk '${id}' tidak ditemukan`);
+    }
+
+    this.assertValidDiscountPrice(
+      dto.basePrice ?? current.basePrice,
+      dto.discountPrice !== undefined ? dto.discountPrice : current.discountPrice,
+    );
+
     const data: Prisma.ProductUpdateInput = { ...dto };
     if (dto.basePrice !== undefined) {
       data.basePrice = new Prisma.Decimal(dto.basePrice);
@@ -345,6 +364,19 @@ export class ProductsService {
         throw new NotFoundException(`Produk '${id}' tidak ditemukan`);
       }
       throw e;
+    }
+  }
+
+  private assertValidDiscountPrice(
+    basePrice: Prisma.Decimal.Value,
+    discountPrice: Prisma.Decimal.Value | null | undefined,
+  ): void {
+    if (discountPrice === null || discountPrice === undefined) return;
+
+    const discount = new Prisma.Decimal(discountPrice);
+    const base = new Prisma.Decimal(basePrice);
+    if (!discount.lessThan(base)) {
+      throw new BadRequestException('Harga diskon harus lebih kecil dari harga dasar');
     }
   }
 
